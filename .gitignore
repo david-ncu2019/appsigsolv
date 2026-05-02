@@ -1,0 +1,21 @@
+# Override root .gitignore rules (which ignore non-ipynb files)
+!*.py
+!*.csv
+!*.md
+!*.json
+!.gitignore
+
+# Allow directory traversal
+!*/
+
+# Standard Python ignores
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Results and outputs
+results/
+
+# OS generated files
+.DS_Store
+Thumbs.db
