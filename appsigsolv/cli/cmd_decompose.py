@@ -51,6 +51,13 @@ def run_decompose(args):
 
     for comp in components_to_process:
         print(f"\n{'='*60}\nProcessing: {comp}\n{'='*60}")
+
+        # Check if already processed
+        json_path = out_root / f"{stem}_model_{comp}.json"
+        if json_path.exists():
+            print(f"  [info] Component '{comp}' already processed. Skipping.")
+            continue
+
         try:
             series, detected_date_col = load_and_preprocess(str(csv_path), comp, args.date_col, args.unit, irregular=args.irregular)
         except KeyError:
@@ -58,6 +65,11 @@ def run_decompose(args):
             continue
             
         print(f"  Series loaded: {len(series)} points")
+
+        if len(series) == 0:
+            print(f"  [error] Component '{comp}' has no valid data after preprocessing. Skipping.")
+            continue
+
         jump_dates = detect_jumps(series, extra_jumps)
         
         final_periods = list(candidate_periods)
