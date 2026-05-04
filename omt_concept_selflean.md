@@ -1,164 +1,485 @@
-# The Overall Model Test and the Delft School of Geodetic Quality Control
+# The Overall Model Test: A Complete Lecture on Geodetic Quality Control
 
-## Introduction: Why Model Validation Matters
-
-Every physical measurement contains noise. When estimating parameters from data, we define a mathematical model with two parts:
-
-- **Functional model** ($E\{y\} = Ax$): Defines the expected relationship between measurements ($y$) and unknowns ($x$).
-- **Stochastic model** ($D\{y\} = Q_{yy}$): Defines the expected random measurement noise and observation correlations.
-
-If this model represents reality perfectly, the resulting residuals (the difference between actual and expected measurements) will only contain random noise. If the residuals are systematically large or reveal a pattern, the model is misspecified—meaning either the physical relationships are incomplete or the noise assumptions are wrong.
-
-The **DIA procedure** (Detection, Identification, Adaptation) is a three-step statistical quality control framework developed by the Delft School of Geodesy. It was designed to systematically detect, locate, and fix model misspecifications before biased parameter estimates corrupt your analysis. This framework is fundamental to geodetic surveying, GNSS positioning, InSAR time-series analysis, and any signal processing task where measurement integrity must be validated.
-
-### 1. Detection Phase: The Overall Model Test (OMT)
-
-#### The Concept: A Global Alarm System
-
-The **OMT** serves as the first line of defense in quality control. It functions as a global diagnostic tool that checks whether the overall set of residuals is statistically acceptable given your model assumptions. Think of it as a system-wide alarm: if the OMT rejects your model, something is wrong, but the test itself cannot tell you what.
-
-The OMT operates under a **null hypothesis** ($H_0$) stating that both the functional and stochastic models are correct and fully represent the data-generating process. If this hypothesis is true, your residuals should exhibit only random noise. If the test fails, it signals that:
-
-1. Your functional model is incomplete (missing physics, parameters, or trends).
-2. Your stochastic model is wrong (noise assumptions are violated, correlations are unmodeled).
-3. Systematic errors exist in the data (instrumental biases, unmodeled environmental effects).
-
-The beauty of the OMT is that it operates as an **unspecified test**—it detects that an error exists without pinpointing which measurement or model component caused it. This is by design: you pay the price of non-specificity for the gain of global validity.
-
-#### Practical Applications Across Disciplines
-
-**GNSS Positioning**: When a receiver collects signals from GPS satellites, systematic errors arise from satellite clock drifts, atmospheric delays, multipath effects, or hardware failures. The OMT immediately reveals whether these effects are larger than your stochastic model predicts. A rejection signals that you cannot trust your position estimate.
-
-**InSAR Time-Series Monitoring**: Subsidence or deformation monitoring often assumes a simple linear trend. But real ground may undergo thermal expansion (daily/seasonal cycles), sudden sinkhole drops, or complex non-linear subsidence. The OMT detects when the simple linear model fails to capture this reality.
-
-**Signal Processing in Time-Series**: If you model a signal as a combination of deterministic trends and random noise, the OMT flags when your decomposition is incomplete. A strong rejection might indicate unmodeled oscillations, structural breaks, or regime changes.
-
-#### The Mathematical Foundation
-
-First, we calculate the least-squares residuals:
-$$\hat{e}_0 = y - A\hat{x}_0$$
-
-We need a single number to represent the size of this residual vector. Simply summing the squared residuals ($\hat{e}_0^T \hat{e}_0$) is insufficient because it ignores the fact that some measurements are more precise than others. We must weight the residuals using the inverse of the covariance matrix ($Q_{yy}^{-1}$). This creates the test statistic $T$:
-$$T = \hat{e}_0^T Q_{yy}^{-1} \hat{e}_0$$
-
-**Derivation for Uncorrelated Observations:**
-Assume all measurements are independent and share the same variance ($\sigma_m^2$). The covariance matrix $Q_{yy}$ becomes a diagonal matrix scaled by this variance: $Q_{yy} = \sigma_m^2 I$, where $I$ is the identity matrix.
-
-1.  Substitute the simplified $Q_{yy}$ into the equation for $T$:
-    $$T = \hat{e}_0^T (\sigma_m^2 I)^{-1} \hat{e}_0$$
-2.  The inverse of a scalar multiplied by the identity matrix is the reciprocal scalar multiplied by the identity matrix:
-    $$T = \hat{e}_0^T \left(\frac{1}{\sigma_m^2} I\right) \hat{e}_0$$
-3.  Since multiplying a vector by the identity matrix leaves it unchanged, we can move the scalar to the front:
-    $$T = \frac{1}{\sigma_m^2} (\hat{e}_0^T \hat{e}_0)$$
-4.  The dot product $\hat{e}_0^T \hat{e}_0$ is exactly the sum of the squared individual residuals:
-    $$T = \frac{\sum_{i=1}^m \hat{e}_{i}^2}{\sigma_m^2}$$
-
-This test statistic $T$ follows a Chi-square ($\chi^2$) distribution. The shape of this distribution depends on the redundancy, or degrees of freedom ($r = m - n$), where $m$ is the number of observations and $n$ is the number of estimated parameters. We set a significance level ($\alpha$), typically **0.05**, representing our tolerance for false alarms. If $T$ exceeds the critical value $K_\alpha$, we reject $H_0$.
-
-### 2. Identification Phase: The w-test and Data Snooping
-
-#### When the OMT Rejects: What Comes Next?
-
-If the **OMT** fails, we know there is an error, but we do not know where. The Identification phase moves beyond detecting a problem to locating and characterizing it. This phase applies targeted statistical tests to individual observations or hypothesis blocks, seeking to isolate the specific source of the misspecification.
-
-The classical approach is **Baarda's w-test**, a procedure for detecting individual outliers or blunders in the data. This process is called **data snooping**: systematically testing hypotheses about which observations might be corrupted or which model components might be missing.
-
-The strict theoretical equation for testing the $i$-th observation is:
-$$w_i = \frac{c_i^T Q_{yy}^{-1} \hat{e}_0}{\sqrt{c_i^T Q_{yy}^{-1} Q_{\hat{e}_0} Q_{yy}^{-1} c_i}}$$
-Here, $c_i$ is a vector containing a **1** at the $i$-th position and **0** everywhere else. Its purpose is to mathematically isolate the $i$-th element of a vector or matrix.
-
-**Derivation of the Highly Redundant Approximation:**
-Calculating the exact covariance matrix of the residuals ($Q_{\hat{e}_0}$) is computationally heavy: $Q_{\hat{e}_0} = Q_{yy} - A(A^T Q_{yy}^{-1} A)^{-1} A^T$. If we have massive redundancy ($m \gg n$), the projection matrix portion approaches zero, allowing the assumption that $Q_{\hat{e}_0} \approx Q_{yy} = \sigma_m^2 I$.
-
-1.  **Simplify the Numerator:**
-    $$\text{Numerator} = c_i^T \left(\frac{1}{\sigma_m^2} I\right) \hat{e}_0 = \frac{1}{\sigma_m^2} (c_i^T \hat{e}_0)$$
-    Because $c_i$ isolates the $i$-th element, $c_i^T \hat{e}_0 = \hat{e}_{0,i}$.
-    $$\text{Numerator} = \frac{\hat{e}_{0,i}}{\sigma_m^2}$$
-
-2.  **Simplify the Denominator:**
-    Substitute the approximation $Q_{\hat{e}_0} \approx \sigma_m^2 I$:
-    $$\text{Denominator} = \sqrt{c_i^T \left(\frac{1}{\sigma_m^2} I\right) (\sigma_m^2 I) \left(\frac{1}{\sigma_m^2} I\right) c_i}$$
-    Multiply the scalars together ($1/\sigma_m^2 \cdot \sigma_m^2 \cdot 1/\sigma_m^2 = 1/\sigma_m^2$):
-    $$\text{Denominator} = \sqrt{c_i^T \left(\frac{1}{\sigma_m^2} I\right) c_i} = \sqrt{\frac{1}{\sigma_m^2} (c_i^T c_i)}$$
-    Since $c_i$ has exactly one **1**, the dot product $c_i^T c_i = 1$.
-    $$\text{Denominator} = \sqrt{\frac{1}{\sigma_m^2}} = \frac{1}{\sigma_m}$$
-
-3.  **Combine Numerator and Denominator:**
-    $$w_i = \frac{\frac{\hat{e}_{0,i}}{\sigma_m^2}}{\frac{1}{\sigma_m}} = \frac{\hat{e}_{0,i}}{\sigma_m^2} \cdot \frac{\sigma_m}{1} = \frac{\hat{e}_{0,i}}{\sigma_m}$$
-
-**A Critique of the Approximation:**
-Relying on this simplified equation introduces a structural blind spot. The assumption $Q_{\hat{e}_0} \approx Q_{yy}$ means you are completely ignoring the geometric strength of your design matrix $A$. By ignoring the subtraction of $A(A^T Q_{yy}^{-1} A)^{-1} A^T$, the denominator is artificially larger than it should be. Consequently, your calculated $w_i$ statistic will be systematically smaller than the true theoretical value. You run a significant risk of committing a **Type II error** (missed detection), failing to identify real outliers because the test statistic is dampened. 
-
-**Practical Guidance**: The redundancy ratio $r/m$ (degrees of freedom divided by number of observations) is your diagnostic. If $r/m > 0.5$ (meaning you have more redundancy than unknowns), the approximation is generally safe. If $r/m < 0.1$, you should compute the exact covariance matrix $Q_{\hat{e}_0}$ or use alternative identification methods. You should validate exactly how large $m$ needs to be relative to $n$ in your specific datasets before trusting this approximation blindly.
-
-#### Beyond Data Snooping: Multiple Hypotheses Testing
-
-The w-test excels at detecting individual blunders, but it assumes the only problem is corrupted data. In many modern applications—especially time-series analysis—your real challenge is that the functional model itself is incomplete. A strong OMT rejection combined with systematic residual patterns (waves, jumps, trends) often signals missing model components, not bad data.
-
-When you suspect the functional model is incomplete, you should employ **Multiple Hypotheses Testing**:
-
-1. **Define alternative models**: Propose competing hypotheses about what physics might be missing. In subsidence monitoring, you might test "linear trend," "linear + seasonal," "linear + structural break," "piecewise linear."
-2. **Compute test statistics for each**: For each candidate model, calculate the residuals and the corresponding OMT statistic.
-3. **Compare and select**: Use information criteria (AIC, BIC) or likelihood ratio tests to determine which model best fits the data while remaining parsimonious.
-4. **Validate via DIA cycle**: Once you extend your model, re-run the full DIA procedure to confirm the expanded model passes the OMT.
-
-This approach is more suitable when your misspecification is structural (missing a trend, cycle, or regime shift) rather than isolated (a few bad measurements).
-
-### 3. Adaptation Phase: Repairing the Model
-
-Once the error is identified, the mathematical model must be repaired. You cannot leave the misspecification in the system, as it will warp the final parameter estimates, introducing bias that cascades through all downstream analysis. The Adaptation phase requires a decision: is the problem in the data or in the model?
-
-#### Strategy 1: Data Snooping (Removing Blunders)
-
-If the $w$-test points to a specific faulty observation (a sensor glitch, a hardware failure, or a genuine outlier), you assume the error is localized to a few measurements. You adapt the model by discarding the corrupted data point(s) and re-running the estimation. This is defensible only when:
-
-- The w-test clearly identifies isolated observations with large, significant deviations.
-- You have physical or contextual evidence that these observations are unreliable (e.g., you know the instrument malfunctioned at that time).
-- Removing them does not substantially reduce your observational redundancy.
-
-**Warning**: Indiscriminate data deletion destroys information and inflates the risk of confirmation bias (keeping data that supports your preferred hypothesis and discarding data that contradicts it).
-
-#### Strategy 2: Model Extension (Capturing Missing Physics)
-
-If a block of data fails, or the residuals display a clear systematic pattern (oscillations, a sudden jump, a changing trend), discarding data is not the answer because the problem is likely structural. Instead, you assume the functional model is incomplete and missing important physics. You adapt by extending matrix $A$ to include new parameters that represent the previously unmodeled physical reality:
-
-- **Periodic signals**: Add sinusoidal terms (Fourier basis) or harmonic parameters for daily/seasonal cycles.
-- **Structural breaks**: Add step-function parameters for sudden changes (equipment upgrades, facility relocations).
-- **Non-linear trends**: Add polynomial or spline terms for accelerating or decelerating processes.
-- **Environmental factors**: Add parameters for temperature, humidity, or other external drivers if they correlate with residuals.
-
-**Example in subsidence monitoring**: Your initial model assumes linear subsidence: $y_i = c_0 + c_1 t_i$. The OMT rejects this model. Visual inspection shows the residuals oscillate seasonally. You extend the model to include annual harmonics: $y_i = c_0 + c_1 t_i + c_2 \sin(2\pi t_i) + c_3 \cos(2\pi t_i)$. Now re-run the DIA cycle.
-
-#### The DIA Loop: Iterative Refinement
-
-The process does not end after one adaptation. You loop back to the Detection phase after each adjustment. You repeat the **DIA cycle** (OMT → w-test → adaptation) until the **OMT** passes, confirming that your residuals contain only random noise consistent with your stochastic model. Each iteration refines your understanding of the true underlying process.
-
-This cyclical workflow embodies the Delft School philosophy: **quality comes from validated models, not from blind faith in a single hypothesis**.
+**Running example used throughout:** A GNSS station recording daily vertical
+positions over three years to monitor ground subsidence. This is one of the
+simplest and most common geodetic timeseries — and every concept introduced
+below applies directly to it.
 
 ---
 
-## Why the DIA Framework Matters for Your Signal Solver
+## Part 1 — Why Models Fail and Why It Matters
 
-When building a timeseries signal solver, the DIA framework is not optional—it is foundational. Here's why:
+Imagine a GNSS monument anchored into a concrete pier in a sedimentary basin.
+Every day, the receiver records its vertical position. Over three years, you
+have roughly $m = 1095$ daily measurements. You plot them and the data trends
+downward — the ground is sinking. You fit a straight line and call that your
+estimate of the subsidence velocity.
 
-1. **Prevents Biased Estimates**: Without quality control, a misspecified model produces estimates that are systematically wrong but appear statistically valid. By the time you realize the error, you may have published results, made decisions, or influenced policy.
+This is the classic estimation problem. But before you trust that velocity, you
+must answer one uncomfortable question: **does your model actually represent
+what happened in those three years?**
 
-2. **Distinguishes Between Problem Types**: The DIA framework forces you to ask: Is my data bad, or is my model bad? These are fundamentally different problems requiring different solutions.
+Perhaps on day 312, a technician bumped the antenna and the position jumped by
+20 mm. Perhaps the soil undergoes seasonal shrink–swell cycles that a straight
+line cannot capture. Perhaps an earthquake on day 740 permanently offset the
+monument by 8 mm. Any of these effects will contaminate your velocity estimate
+without announcing themselves — your least-squares algorithm will "absorb" the
+anomaly by distorting all the other parameters.
 
-3. **Enables Iterative Refinement**: You do not need to get the model perfect on the first try. The DIA cycle provides a systematic pathway to improvement, building confidence in your final estimates.
+This is the problem the **DIA procedure** solves.
 
-4. **Quantifies Reliability**: Passing the OMT is not just a statistical check—it is a statement about the integrity of your analysis. Readers and decision-makers can trust that your model has been validated against the data.
+### 1.1  The Two-Part Mathematical Model
 
-5. **Complements Visualization**: While residual plots and diagnostic charts are essential, the OMT provides a rigorous, defensible statistical criterion that is independent of human judgment about what "looks acceptable."
+Every least-squares estimation requires two model components defined
+simultaneously.
 
-### Implementing OMT in Your Solver
+**The Functional Model** defines what you *expect* to observe:
 
-When you implement your solver, consider:
+$$E\{y\} = Ax$$
 
-- **Compute the test statistic** as a standard output after each estimation.
-- **Report the critical threshold** and whether the model passes or fails at your chosen significance level (typically $\alpha = 0.05$).
-- **Use residual diagnostics** in conjunction with the OMT: plot residuals, compute autocorrelation, check for normality. The OMT tells you *whether* something is wrong; visual inspection tells you *what* it might be.
-- **Document your adaptation decisions**: If you extend the model or remove data, explain why and present the before/after OMT statistics.
-- **Validate the redundancy assumption**: Before using simplified w-statistics, check that your redundancy ratio supports the approximation. If not, compute exact covariance matrices.
+Here, $y$ is the $m \times 1$ vector of daily vertical positions (observations),
+$x$ is the $n \times 1$ vector of unknown parameters, and $A$ is the
+$m \times n$ design matrix encoding the physical relationship between
+observations and unknowns.
 
-The OMT is a tool for scientific integrity. It forces honesty about whether your model actually represents your data.
+For a linear subsidence model, $x = [x_0,\; v]^T$ where $x_0$ is the initial
+height and $v$ is the velocity. The design matrix has one row per day:
+
+$$A = \begin{bmatrix} 1 & t_1 \\ 1 & t_2 \\ \vdots & \vdots \\ 1 & t_m \end{bmatrix}$$
+
+**The Stochastic Model** defines the *expected noise*:
+
+$$D\{y\} = Q_{yy}$$
+
+The covariance matrix $Q_{yy}$ is the mathematical container for every random
+uncertainty in the data. In a GNSS timeseries, $Q_{yy}$ represents receiver
+thermal noise, residual atmospheric delays from the troposphere and ionosphere,
+and multipath scattering from nearby reflective surfaces.
+
+The simplest assumption is that all observations are independent and share the
+same noise variance $\sigma_m^2$, giving:
+
+$$Q_{yy} = \sigma_m^2 I$$
+
+This assumption treats measurement errors as **white noise** — no temporal
+memory, no correlation between days. Real GNSS data violates this regularly:
+high-rate sampling creates time-correlated noise, regional atmospheric
+conditions create spatial correlation between nearby stations, and satellite
+signals at low elevation angles carry more error than signals near the zenith.
+These violations matter because an incorrectly specified $Q_{yy}$ will produce
+parameter estimates with falsely optimistic precision, and will cause the OMT
+to give misleading verdicts.
+
+### 1.2  The Delft School Philosophy: Estimation and Testing Are Inseparable
+
+The classical geodetic workflow treated data adjustment (estimation) and quality
+checking (testing) as two disconnected steps: first fit the model, then inspect
+the residuals. The **Delft School of Geodesy**, through the work of Willem
+Baarda and later Peter Teunissen, overturned this view.
+
+Their central argument: **you cannot reliably estimate parameters without first
+validating the model that produced them.** If the functional or stochastic
+model is wrong, the least-squares estimator dutifully produces a "best fit" to
+the wrong model — a precise answer to the wrong question.
+
+Teunissen formalized this insight into the **DIA framework** (Detection,
+Identification, Adaptation), proving mathematically that the final parameter
+estimate is not just a function of the observations but of the *entire
+decision chain* — including every statistical test applied along the way. Even
+when each individual estimator is unbiased under its specific hypothesis, the
+combined DIA-estimator retains a **conditional bias** because it inherits the
+uncertainty of each testing decision. This probabilistic view fundamentally
+changed how geodesists quantify integrity risk in safety-critical applications
+such as aviation GNSS navigation.
+
+The practical consequence: quality control is not a post-processing check. It
+is an integral part of the estimation process itself.
+
+---
+
+## Part 2 — Detection: The Overall Model Test (OMT)
+
+### 2.1  What the OMT Does (and Does Not Do)
+
+The OMT is the first and most important test in the DIA cycle. It asks a single
+global question:
+
+> **Are the residuals of my fitted model consistent with the noise level I
+> claimed in $Q_{yy}$?**
+
+It operates under a **null hypothesis** $H_0$:
+
+> Both the functional model and the stochastic model are correct and fully
+> represent the data.
+
+The OMT is an **unspecified test** — it can detect that something is wrong
+without identifying what. A rejection tells you the model failed globally. It
+does not tell you whether the cause was a bad data point on day 312, an
+unmodeled seasonal cycle, or an underestimated noise variance. That
+specificity is the job of the Identification phase.
+
+This is a deliberate design choice. The OMT pays the price of non-specificity
+in exchange for global validity: it will catch *any* form of misspecification,
+regardless of its origin.
+
+### 2.2  Building the Test Statistic $T$
+
+After fitting the linear model by least squares, we obtain the **residual
+vector**:
+
+$$\hat{e}_0 = y - A\hat{x}_0$$
+
+Each element $\hat{e}_{0,i}$ is the vertical distance between the actual
+measurement on day $i$ and the fitted straight line. If the model is correct,
+these residuals should look like random noise drawn from the distribution
+implied by $Q_{yy}$.
+
+We need a single scalar to summarise the entire $m$-dimensional residual
+vector. Simply summing the squared residuals, $\hat{e}_0^T \hat{e}_0$, ignores
+the fact that not all measurements are equally reliable. We must weight each
+residual by its inverse variance. This produces the **test statistic**:
+
+$$\boxed{T = \hat{e}_0^T Q_{yy}^{-1} \hat{e}_0}$$
+
+#### Derivation for the uncorrelated equal-variance case
+
+Assume $Q_{yy} = \sigma_m^2 I$. Substituting into $T$:
+
+$$T = \hat{e}_0^T (\sigma_m^2 I)^{-1} \hat{e}_0
+    = \hat{e}_0^T \left(\frac{1}{\sigma_m^2} I\right) \hat{e}_0
+    = \frac{1}{\sigma_m^2}\, \hat{e}_0^T \hat{e}_0$$
+
+Because $\hat{e}_0^T \hat{e}_0 = \sum_{i=1}^m \hat{e}_{0,i}^2$, the test
+statistic simplifies to:
+
+$$T = \frac{\displaystyle\sum_{i=1}^m \hat{e}_{0,i}^2}{\sigma_m^2}$$
+
+In words: $T$ is the sum of the squared daily position residuals, normalised by
+the expected daily noise variance. If the noise model is correct, this ratio
+should be close to the number of degrees of freedom.
+
+### 2.3  The Statistical Distribution of $T$
+
+Understanding *why* $T$ follows a particular distribution requires one
+foundational fact: if the observations $y$ are normally distributed under $H_0$,
+then the residuals $\hat{e}_0$ are also normally distributed. The weighted sum
+of squares of normally distributed variables follows a **Chi-square
+distribution**.
+
+**Under $H_0$ (model is correct):**
+
+$$T \sim \chi^2(r)$$
+
+where the degrees of freedom $r = m - n$ is the **redundancy** — the number of
+observations minus the number of estimated parameters. For our 3-year GNSS
+timeseries with $m = 1095$ and $n = 2$, we have $r = 1093$.
+
+The redundancy has a physical interpretation: it counts how many measurements
+are "left over" after satisfying the model's information demands. High
+redundancy means the data contains many independent checks — the system is
+geometrically strong and statistically sensitive to anomalies.
+
+**Under $H_a$ (model is wrong):**
+
+If a bias exists — whether a data error, an unmodeled physical effect, or a
+misspecified stochastic model — the test statistic shifts. Instead of the
+central Chi-square distribution, $T$ follows a **non-central Chi-square**:
+
+$$T \sim \chi^2(r, \lambda)$$
+
+The non-centrality parameter $\lambda > 0$ measures the severity of the
+violation. As the bias grows larger, $\lambda$ increases, pushing the
+distribution's probability mass further into the tail. The entire curve shifts
+to the right, away from the decision threshold.
+
+### 2.4  Making the Decision
+
+We select a **significance level** $\alpha$, typically $0.05$. This is the
+probability of falsely rejecting a valid $H_0$ (a **false alarm** or Type I
+error). From the central $\chi^2(r)$ distribution, we find the **critical
+value** $K_\alpha$ such that:
+
+$$P(T > K_\alpha \mid H_0) = \alpha$$
+
+The decision rule is simple:
+
+| Result | Interpretation |
+|--------|----------------|
+| $T \leq K_\alpha$ | **Accept $H_0$.** The model fits the data. Residuals are consistent with your noise assumptions. The velocity estimate is trustworthy. |
+| $T > K_\alpha$ | **Reject $H_0$.** The model fails. Something is wrong — a data error, missing physics, or a misspecified covariance. Proceed to Identification. |
+
+**GNSS example in numbers:**
+
+A 3-year daily GNSS timeseries ($r = 1093$) with $\alpha = 0.05$ gives
+$K_\alpha \approx 1148$. If $T = 1250$, the OMT rejects $H_0$. If $T = 1090$,
+it accepts. The computed value of $T$ relative to $K_\alpha$ is the only thing
+that determines the verdict.
+
+---
+
+## Part 3 — Identification: Finding the Source of Failure
+
+### 3.1  The Role of Identification
+
+A rejected OMT is an alarm, not a diagnosis. The Identification phase runs
+targeted tests to locate the specific source of the failure. There are two
+complementary strategies:
+
+1. **Baarda's w-test** — tests whether a specific individual observation is a
+   blunder (data error).
+2. **Multiple Hypotheses Testing** — tests whether a specific structural
+   addition to the functional model (e.g., a seasonal term, a step function)
+   would explain the rejection.
+
+### 3.2  Baarda's w-Test: Testing a Single Observation
+
+The w-test isolates one daily measurement and asks: *is this observation so
+inconsistent with all other data that it must be an outlier?*
+
+For the $i$-th observation, define the **selector vector** $c_i$ — a vector of
+zeros with a single 1 in position $i$. It mathematically extracts the $i$-th
+element from any vector.
+
+The exact theoretical w-statistic is:
+
+$$w_i = \frac{c_i^T Q_{yy}^{-1} \hat{e}_0}{\sqrt{c_i^T Q_{yy}^{-1} Q_{\hat{e}_0} Q_{yy}^{-1} c_i}}$$
+
+where $Q_{\hat{e}_0}$ is the exact **residual covariance matrix**:
+
+$$Q_{\hat{e}_0} = Q_{yy} - A(A^T Q_{yy}^{-1} A)^{-1} A^T$$
+
+Under $H_0$, $w_i \sim \mathcal{N}(0,1)$. If $|w_i| > N_{\alpha/2}$ (e.g.,
+$|w_i| > 1.96$ at $\alpha = 0.05$), the $i$-th observation is flagged as
+suspicious.
+
+#### The high-redundancy approximation
+
+Computing $Q_{\hat{e}_0}$ exactly requires forming an $m \times m$ matrix
+product — computationally expensive for long timeseries. For our GNSS case,
+the redundancy is massive ($r/m = 1093/1095 \approx 0.998$). When $m \gg n$,
+the projection matrix $A(A^T Q_{yy}^{-1} A)^{-1} A^T$ becomes negligible
+compared to $Q_{yy}$, so:
+
+$$Q_{\hat{e}_0} \approx Q_{yy} = \sigma_m^2 I$$
+
+Substituting $Q_{yy} = \sigma_m^2 I$ and this approximation into the w-formula:
+
+**Numerator:**
+$$c_i^T \left(\tfrac{1}{\sigma_m^2} I\right) \hat{e}_0 = \frac{\hat{e}_{0,i}}{\sigma_m^2}$$
+
+**Denominator:**
+$$\sqrt{c_i^T \left(\tfrac{1}{\sigma_m^2}I\right)(\sigma_m^2 I)\left(\tfrac{1}{\sigma_m^2}I\right) c_i} = \sqrt{\tfrac{1}{\sigma_m^2}} = \frac{1}{\sigma_m}$$
+
+**Combined:**
+$$\boxed{w_i \approx \frac{\hat{e}_{0,i}}{\sigma_m}}$$
+
+In plain language: the w-statistic for any day is simply that day's residual
+divided by the expected noise standard deviation. For our GNSS example with
+$\sigma_m = 3$ mm, a residual of $\hat{e}_{0,i} = 15$ mm gives $w_i = 5.0$ —
+far exceeding the 1.96 threshold. That day is almost certainly an outlier.
+
+#### When the approximation is safe — and when it is not
+
+| Redundancy ratio $r/m$ | Approximation |
+|------------------------|---------------|
+| $> 0.5$ | Generally safe. The GNSS timeseries case lives here. |
+| $0.1$ to $0.5$ | Use with caution. Validate against the exact formula on a subset. |
+| $< 0.1$ | Unreliable. Compute $Q_{\hat{e}_0}$ exactly. |
+
+**The structural risk of the approximation:** By replacing $Q_{\hat{e}_0}$
+with $Q_{yy}$, you ignore the geometric strength of the design matrix $A$. The
+true denominator is smaller than $\sigma_m$ (because the projection removes
+the part of the noise that is explained by the model). Your approximate $w_i$
+is therefore systematically *smaller* than the true value. The consequence is a
+higher risk of **Type II error** (missed detection): real outliers produce a
+dampened test statistic and may not cross the threshold.
+
+### 3.3  The Minimal Detectable Bias (MDB): How Sensitive Is the Test?
+
+A question that naturally follows from the w-test is: *how large does an error
+have to be before the test reliably catches it?* The answer is the **Minimal
+Detectable Bias (MDB)** — the smallest bias in a single observation that the
+w-test will detect with a specified power.
+
+The MDB connects three things:
+- Your **false alarm rate** $\alpha$ (probability of a wrong rejection).
+- Your desired **detection power** $\gamma_0 = 1 - \beta$ (probability of a
+  correct detection, where $\beta$ is the missed detection rate).
+- The **geometry** of your design matrix $A$ and noise model $Q_{yy}$.
+
+**How to compute it:**
+
+1. From $\alpha$ and $\beta$, determine the required non-centrality parameter
+   $\lambda_0$ using the non-central normal distribution. Typical values:
+   $\alpha = 0.05$, $\beta = 0.20$ give $\lambda_0 \approx 2.8$.
+
+2. The MDB for observation $i$ is:
+
+$$|b_{MDB,i}| = \frac{\lambda_0}{\sqrt{c_i^T Q_{yy}^{-1} Q_{\hat{e}_0} Q_{yy}^{-1} c_i}}$$
+
+The denominator is exactly the term that appears in the w-test denominator
+— it encodes how well the geometry "sees" the $i$-th observation.
+
+**Physical interpretation for GNSS:** If the MDB for a particular observation
+is 3 mm, any error smaller than 3 mm will go undetected (with 80% probability)
+even if you reject $H_0$. If the MDB is 25 mm, the test is geometrically weak
+for that observation: errors up to 25 mm can hide undetected. Surveyors
+compute MDBs *before* collecting data to identify geometrically weak
+observations and improve the network design.
+
+The MDB is the primary **Key Performance Indicator** for a geodetic quality
+control system. It directly quantifies **internal reliability** — the system's
+inherent capacity to spot anomalies — in physical units (millimetres) that are
+immediately interpretable.
+
+### 3.4  Multiple Hypotheses Testing: When the Model Itself Is Wrong
+
+The w-test is designed for the case where the data contains isolated blunders.
+But often the OMT rejection is structural — the functional model is simply
+incomplete. A strong rejection combined with a systematic pattern in the
+residuals (an oscillation, a step, an accelerating trend) almost always signals
+missing physics, not bad data.
+
+In this case, test alternative models directly:
+
+1. **Define candidate hypotheses.** For a GNSS subsidence timeseries, you
+   might propose: (a) linear + annual harmonic, (b) linear + semi-annual
+   harmonic, (c) linear + step function at a specific epoch, (d) piecewise
+   linear with a breakpoint.
+
+2. **Compute the OMT for each.** After extending the design matrix $A$ to
+   include each candidate term, re-run the estimation and compute $T$.
+
+3. **Compare using information criteria.** Use AIC or BIC to penalise model
+   complexity, selecting the model that best balances fit and parsimony.
+
+4. **Return to the DIA cycle.** Once you extend the model, re-run the full
+   Detection → Identification → Adaptation loop to confirm the expanded model
+   passes the OMT.
+
+---
+
+## Part 4 — Adaptation: Repairing the Model
+
+Once the source of the OMT rejection is identified, the model must be repaired.
+Two strategies address fundamentally different problems.
+
+### 4.1  Strategy A — Remove the Blunder
+
+If the w-test clearly identifies an isolated observation with a physically
+plausible explanation (antenna disturbance, equipment malfunction, phase
+unwrapping error), remove it from the dataset and re-estimate. This is the
+**data snooping** approach.
+
+Apply it only when:
+- The w-statistic is large and unambiguous.
+- Physical or logbook evidence supports the removal.
+- Removing the point does not substantially reduce redundancy.
+
+**Warning:** Indiscriminate deletion introduces confirmation bias — you end up
+keeping data that agrees with your hypothesis and discarding data that
+contradicts it. Always document every removal decision.
+
+### 4.2  Strategy B — Extend the Functional Model
+
+If a block of data fails, or residuals show a coherent pattern, the problem is
+structural. The correct response is to extend the design matrix $A$ to
+represent the missing physics.
+
+| Pattern in residuals | Physical cause | Model extension |
+|---------------------|---------------|-----------------|
+| Sinusoidal oscillation at 1 year period | Seasonal soil moisture / temperature | $+ c_2 \sin(2\pi t) + c_3 \cos(2\pi t)$ |
+| Permanent step at epoch $t^*$ | Earthquake, antenna change, monument reset | $+ c_4 \cdot H(t - t^*)$ where $H$ is the Heaviside step |
+| Accelerating downward trend | Groundwater extraction, consolidation | $+ c_5 t^2$ (or spline terms) |
+| Increasing residual scatter | Instrument ageing, environmental change | Update $Q_{yy}$ (stochastic model) |
+
+**GNSS example:** Initial model: $y_i = x_0 + v t_i$. OMT fails.
+Residuals show a clear annual oscillation. Extended model:
+
+$$y_i = x_0 + v t_i + A_1 \sin(2\pi t_i) + A_2 \cos(2\pi t_i)$$
+
+Now $n = 4$, $r = 1091$. Re-run estimation, recompute $T$. If the OMT passes,
+the annual signal was the missing physics.
+
+### 4.3  The DIA Loop: Iterate Until the OMT Passes
+
+The DIA cycle is not a one-pass pipeline. It is an iterative refinement loop:
+
+```
+         ┌──────────────────────────────────────────┐
+         ▼                                          │
+  [Estimate model]                                  │
+         │                                          │
+  [OMT: compute T]                                  │
+         │                                          │
+   T ≤ K_α? ──── Yes ──► DONE. Model accepted.     │
+         │                                          │
+        No                                          │
+         │                                          │
+  [w-test / Multiple Hypotheses Testing]            │
+         │                                          │
+  [Adapt: remove blunder or extend A] ──────────────┘
+```
+
+Each iteration tightens the model's representation of reality. The loop ends
+only when the OMT accepts the null hypothesis, confirming that the residuals
+contain nothing but noise consistent with $Q_{yy}$.
+
+This iterative workflow embodies the Delft School principle:
+**quality comes from validated models, not from blind confidence in a first fit.**
+
+---
+
+## Part 5 — Implementation in Your Signal Solver
+
+When your timeseries signal solver runs an estimation, the following checklist
+ensures OMT is properly integrated.
+
+### 5.1  Standard Outputs for Every Estimation Run
+
+| Output | Formula | Purpose |
+|--------|---------|---------|
+| Test statistic | $T = \hat{e}^T Q_{yy}^{-1} \hat{e}$ | Core OMT input |
+| Degrees of freedom | $r = m - n$ | Defines the $\chi^2$ distribution |
+| Critical value | $K_\alpha$ from $\chi^2(r)$ at chosen $\alpha$ | Decision threshold |
+| Pass/Fail verdict | $T \leq K_\alpha$? | Model validity statement |
+| Redundancy ratio | $r/m$ | Validates whether w-test approximation is safe |
+| MDB per observation | $|b_{MDB,i}|$ | Internal reliability indicator |
+
+### 5.2  Residual Diagnostics to Run Alongside the OMT
+
+The OMT answers *whether* the model failed. Residual diagnostics answer *why*.
+Always run these in parallel:
+
+- **Time-series plot of residuals** — reveals systematic patterns (trends,
+  oscillations, steps, outliers).
+- **Autocorrelation function (ACF)** — detects temporal correlations violating
+  the white-noise assumption in $Q_{yy}$.
+- **Q-Q plot or Kolmogorov–Smirnov test** — checks whether residuals follow the
+  assumed normal distribution.
+- **Power Spectral Density (PSD)** — identifies periodic signals not captured
+  by the functional model.
+
+### 5.3  Decision Protocol
+
+```
+OMT passes AND residuals look random      → Accept model. Report results.
+OMT passes BUT residuals show patterns    → Investigate: correlated noise in Q_yy?
+OMT fails AND isolated w-test flags       → Remove blunder. Re-run DIA.
+OMT fails AND systematic residual pattern → Extend A. Re-run DIA.
+OMT fails AND no clear pattern            → Reassess Q_yy (stochastic misspecification).
+```
+
+### 5.4  Why You Cannot Skip This
+
+Without the OMT:
+- A straight-line fit through data with an undetected step will produce a
+  biased velocity estimate. The bias looks like a legitimate signal.
+- The parameter uncertainties reported by least-squares will appear valid but
+  will be wrong, because they were computed under a misspecified model.
+- Any downstream product — subsidence maps, infrastructure risk assessments,
+  published velocity fields — inherits this silent, unquantified bias.
+
+The OMT is not a formality. It is the guarantee that your parameter estimates
+are grounded in a model that has been statistically tested against the data
+that produced them.
