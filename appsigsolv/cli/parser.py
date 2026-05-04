@@ -49,7 +49,17 @@ def create_parser():
     p_rec.add_argument("--exp", nargs=2, action="append", metavar=("DATE", "TAU"), help="Exponential: onset (YYYYMMDD) and tau (days)")
     p_rec.add_argument("--log", nargs=2, action="append", metavar=("DATE", "TAU"), help="Logarithmic: onset (YYYYMMDD) and tau (days)")
     p_rec.add_argument("-o", "--output", dest="outfile", help="Output file name")
-    p_rec.add_argument("--daily", action="store_true", help="Output daily-sampled reconstruction")
+    p_rec.add_argument(
+        "--sampling-rate",
+        dest="sampling_rate",
+        choices=["daily", "custom"],
+        help="Output sampling: 'daily' for every day, 'custom' for specific days of each month"
+    )
+    p_rec.add_argument(
+        "--custom-dates",
+        dest="custom_dates",
+        help="Comma-separated days of month for --sampling-rate custom (e.g. 1,6,11,16,21,26)"
+    )
     p_rec.add_argument("--ref-date", help="Reference date for model (YYYYMMDD)")
     
     return parser
