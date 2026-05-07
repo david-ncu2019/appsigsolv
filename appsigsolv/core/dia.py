@@ -424,7 +424,7 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
     if not scan_results:
         return None, scan_table
 
-    best = min(scan_results, key=lambda m: (m["_omt_stats"]["n_param"], -m["_omt_stats"]["sigma_mm"], -m["_omt_stats"]["p_value"]))
+    best = min(scan_results, key=lambda m: (m["_omt_stats"]["n_param"], m["_omt_stats"]["sigma_mm"], -m["_omt_stats"]["p_value"]))
     if not no_relax:
         best = test_relaxation(series, jump_dates, best, alpha)
     return best, scan_table
