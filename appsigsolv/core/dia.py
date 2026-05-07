@@ -169,10 +169,14 @@ def _cusum_break_date(residuals: np.ndarray, dates: list, min_segment: int = 10)
         return None
     return dates[break_idx].strftime("%Y%m%d")
 
-def auto_detect_exp_trend(series: pd.Series, b_candidates=None, aic_improvement_threshold: float = 2.0):
+def auto_detect_exp_trend(series: pd.Series, b_candidates=None, aic_improvement_threshold: float = 10.0):
     """
     Test whether series is better described by [1, t, exp(-b*t)-1] than [1, t].
     Returns best b_per_day (1/days) or None if no significant improvement.
+
+    Two guards must both pass:
+    - ΔAIC > aic_improvement_threshold (default 10.0 = strong evidence, Burnham & Anderson)
+    - Exp-trend component explains >= 10% of series variance
     """
     if b_candidates is None:
         b_candidates = np.logspace(-4, -1, 20)
@@ -193,6 +197,8 @@ def auto_detect_exp_trend(series: pd.Series, b_candidates=None, aic_improvement_
 
     best_b = None
     best_aic = aic_base - aic_improvement_threshold
+    best_m_trial = None
+    best_exp_col = None
 
     for b in b_candidates:
         exp_col = np.exp(-b * days) - 1.0
@@ -205,6 +211,16 @@ def auto_detect_exp_trend(series: pd.Series, b_candidates=None, aic_improvement_
         if aic_trial < best_aic:
             best_aic = aic_trial
             best_b = b
+            best_m_trial = m_trial
+            best_exp_col = exp_col
+
+    if best_b is None:
+        return None
+
+    # Variance guard: exp-trend component must explain >= 10% of series variance
+    exp_component = best_exp_col * best_m_trial[2]
+    if np.var(exp_component) / max(np.var(y), 1e-30) < 0.10:
+        return None
 
     return best_b
 
