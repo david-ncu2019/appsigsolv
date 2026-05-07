@@ -39,7 +39,7 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     ax_main.plot(idx, series.values * scale, "o", ms=5, alpha=0.75, color="#95a5a6", label="Observed")
     ax_main.plot(idx, components[f"{comp}_model"].values * scale, "-", lw=2, color="#e74c3c", label="Model")
     stats = best_model.get("_omt_stats", {"sigma_mm": 1.0, "p_value": 1.0, "n_param": 1})
-    ax_main.set_title(f"{stem} {comp}: Observed vs. Model", fontweight='bold')
+    ax_main.set_title(f"{stem}  —  {comp}", fontweight='bold')
     ax_main.set_ylabel(f"Displacement ({unit})")
     ax_main.legend(loc="lower left", frameon=True, framealpha=0.9)
     ax_main.grid(True, ls=":", alpha=0.6)
@@ -100,9 +100,13 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
             label.set_rotation(0)
             label.set_horizontalalignment('center')
 
-    plt.suptitle(f"Timeseries Decomposition: {stem} ({comp})\n"
-                 f"σ={stats['sigma_mm']:.1f}{unit} | p={stats['p_value']:.4f} | n_param={stats['n_param']} | Poly-deg={best_model.get('polynomial')}",
-                 y=0.98, fontweight='bold')
+    exp_b = best_model.get("exp_trend")
+    exp_info = f" | Exp-trend b={exp_b:.4g}/day (τ={1/exp_b:.0f}d)" if exp_b else ""
+    plt.suptitle(
+        f"{stem}  ({comp})\n"
+        f"σ={stats['sigma_mm']:.1f}{unit} | p={stats['p_value']:.4f} | n_param={stats['n_param']} | Poly-deg={best_model.get('polynomial')}{exp_info}",
+        y=0.98, fontweight='bold'
+    )
 
     png_path = out_root / f"{stem}_decomposed_{comp}.png"
     plt.savefig(png_path, dpi=100, bbox_inches="tight")
