@@ -91,6 +91,12 @@ def get_design_matrix4log_func(date_list, log_dict):
             i += 1
     return A
 
+def get_design_matrix4exp_trend(date_list, b_per_day: float):
+    """One-column basis: exp(-b * days_from_start) - 1. At t=0: value=0."""
+    t0 = date_list[0]
+    days = np.array([(d - t0).days for d in date_list], dtype=np.float64)
+    return (np.exp(-b_per_day * days) - 1.0).reshape(-1, 1)
+
 def get_design_matrix4time_func(date_list, model, ref_date=None):
     """
     Design matrix for time functions parameter estimation.
@@ -103,20 +109,22 @@ def get_design_matrix4time_func(date_list, model, ref_date=None):
     ref_idx = date_list.index(ref_date) if ref_date in date_list else 0
     yr_diff -= yr_diff[ref_idx]
 
-    poly_deg   = model.get('polynomial', 0)
-    periods    = model.get('periodic', [])
-    steps      = model.get('stepDate', [])
-    polylines  = model.get('polyline', [])
-    exps       = model.get('exp', dict())
-    logs       = model.get('log', dict())
-    
-    num_period = len(periods)
-    num_step   = len(steps)
-    num_pline  = len(polylines)
-    num_exp    = sum(len(val) for key, val in exps.items())
-    num_log    = sum(len(val) for key, val in logs.items())
+    poly_deg      = model.get('polynomial', 0)
+    periods       = model.get('periodic', [])
+    steps         = model.get('stepDate', [])
+    polylines     = model.get('polyline', [])
+    exps          = model.get('exp', dict())
+    logs          = model.get('log', dict())
+    exp_trend_b   = model.get('exp_trend', None)
 
-    num_param = (poly_deg + 1) + (2 * num_period) + num_step + num_pline + num_exp + num_log
+    num_period    = len(periods)
+    num_step      = len(steps)
+    num_pline     = len(polylines)
+    num_exp       = sum(len(val) for key, val in exps.items())
+    num_log       = sum(len(val) for key, val in logs.items())
+    num_exp_trend = 1 if (exp_trend_b is not None and exp_trend_b != 0) else 0
+
+    num_param = (poly_deg + 1) + num_exp_trend + (2 * num_period) + num_step + num_pline + num_exp + num_log
     if num_param <= 0:
         raise ValueError('NO time functions specified!')
 
@@ -127,6 +135,11 @@ def get_design_matrix4time_func(date_list, model, ref_date=None):
     c1 = c0 + poly_deg + 1
     A[:, c0:c1] = get_design_matrix4polynomial_func(yr_diff, poly_deg)
     c0 = c1
+
+    if num_exp_trend > 0:
+        c1 = c0 + 1
+        A[:, c0:c1] = get_design_matrix4exp_trend(date_list, exp_trend_b)
+        c0 = c1
 
     if num_period > 0:
         c1 = c0 + 2 * num_period
@@ -192,34 +205,43 @@ def extract_components(series: pd.Series, best_model: dict, comp: str) -> dict:
     model = {k: v for k, v in best_model.items() if not k.startswith("_")}
     G, m, e2, d_hat = estimate_time_func(model, date_list, dis_ts)
 
-    poly_deg   = model.get("polynomial", 0)
-    periods    = model.get("periodic", [])
-    steps      = model.get("stepDate", [])
-    polylines  = model.get("polyline", [])
-    exps       = model.get("exp", {})
-    logs       = model.get("log", {})
+    poly_deg      = model.get("polynomial", 0)
+    periods       = model.get("periodic", [])
+    steps         = model.get("stepDate", [])
+    polylines     = model.get("polyline", [])
+    exps          = model.get("exp", {})
+    logs          = model.get("log", {})
+    exp_trend_b   = model.get("exp_trend", None)
+    n_exp_trend   = 1 if (exp_trend_b is not None and exp_trend_b != 0) else 0
 
     components = {}
     full_date_list = [d.to_pydatetime() if hasattr(d, "to_pydatetime") else d for d in series.index]
     G_full = get_design_matrix4time_func(full_date_list, model)
     idx = series.index
 
+    # Polynomial trend
     c0 = 0
-    c1 = c0 + poly_deg + 1
+    c1 = poly_deg + 1
     trend_val = G_full[:, c0:c1] @ m[c0:c1]
     c0 = c1
-    
-    curr_c0 = c1
-    curr_c0 += 2 * len(periods)
-    curr_c0 += len(steps)
-    
+
+    # Exponential trend component (new primary trend shape)
+    if n_exp_trend > 0:
+        c1 = c0 + 1
+        exp_trend_val = G_full[:, c0:c1] @ m[c0:c1]
+        components[f"{comp}_exp_trend"] = pd.Series(exp_trend_val, index=idx)
+        c0 = c1
+
+    # Polylines are folded into the trend display
+    curr_c0 = poly_deg + 1 + n_exp_trend + 2 * len(periods) + len(steps)
     c1_pline = curr_c0 + len(polylines)
     if len(polylines) > 0:
         trend_val = trend_val + G_full[:, curr_c0:c1_pline] @ m[curr_c0:c1_pline]
 
     components[f"{comp}_trend"] = pd.Series(trend_val, index=idx)
 
-    c0 = poly_deg + 1
+    # Periodic
+    c0 = poly_deg + 1 + n_exp_trend
     for period_yr in periods:
         label = _period_label(period_yr)
         c1 = c0 + 2
@@ -227,21 +249,24 @@ def extract_components(series: pd.Series, best_model: dict, comp: str) -> dict:
         components[f"{comp}_{label}"] = pd.Series(seasonal_val, index=idx)
         c0 = c1
 
-    c0 = poly_deg + 1 + 2 * len(periods)
+    # Steps / jumps
+    c0 = poly_deg + 1 + n_exp_trend + 2 * len(periods)
     if steps:
         c1 = c0 + len(steps)
         jump_val = G_full[:, c0:c1] @ m[c0:c1]
         components[f"{comp}_jump"] = pd.Series(jump_val, index=idx)
         c0 = c1
 
-    c0 = poly_deg + 1 + 2 * len(periods) + len(steps) + len(polylines)
+    # Post-seismic exponential relaxation
+    c0 = poly_deg + 1 + n_exp_trend + 2 * len(periods) + len(steps) + len(polylines)
     n_exp = sum(len(v) for v in exps.values())
     if n_exp > 0:
         c1 = c0 + n_exp
         exp_val = G_full[:, c0:c1] @ m[c0:c1]
         components[f"{comp}_exp"] = pd.Series(exp_val, index=idx)
         c0 = c1
-        
+
+    # Logarithmic relaxation
     n_log = sum(len(v) for v in logs.values())
     if n_log > 0:
         c1 = c0 + n_log

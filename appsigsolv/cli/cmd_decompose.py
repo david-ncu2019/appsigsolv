@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 
 from appsigsolv.io.data_manager import load_and_preprocess, save_json_config, save_csv
-from appsigsolv.core.dia import detect_jumps, auto_detect_periods, prescreen_periods, run_omt_sigma_scan
+from appsigsolv.core.dia import detect_jumps, auto_detect_periods, prescreen_periods, run_omt_sigma_scan, auto_detect_exp_trend
 from appsigsolv.core.modeling import extract_components
 from appsigsolv.utils.visualization import save_plot, save_report
 
@@ -85,6 +85,24 @@ def run_decompose(args):
                     
         final_periods.sort()
 
+        # Resolve --exp-trend argument
+        exp_trend_arg = getattr(args, "exp_trend", None)
+        if exp_trend_arg is None:
+            exp_trend_b = None
+        elif str(exp_trend_arg).lower() == "auto":
+            exp_trend_b = auto_detect_exp_trend(series)
+            if exp_trend_b is not None:
+                print(f"  [exp-trend] Auto-detected b = {exp_trend_b:.6f} /day")
+            else:
+                print(f"  [exp-trend] Auto-detection: no significant exponential trend found")
+        else:
+            try:
+                exp_trend_b = float(exp_trend_arg)
+                print(f"  [exp-trend] Using user-specified b = {exp_trend_b:.6f} /day")
+            except ValueError:
+                print(f"  [exp-trend] Warning: could not parse '{exp_trend_arg}' as float. Disabling exp-trend.")
+                exp_trend_b = None
+
         candidate_degrees = [0, 1, 2] if args.poly_deg == -1 else [args.poly_deg]
         best_overall_model = None
         best_overall_scan_table = []
@@ -97,7 +115,8 @@ def run_decompose(args):
                 series, jump_dates, final_periods, extra_polylines, extra_logs, deg,
                 args.sigma_min, args.sigma_max, args.sigma_step,
                 args.alpha, args.max_iter,
-                no_relax=args.no_relax, cores=args.cores
+                no_relax=args.no_relax, cores=args.cores,
+                exp_trend_b=exp_trend_b
             )
             
             if best_model_deg is not None:

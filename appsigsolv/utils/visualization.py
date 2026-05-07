@@ -30,6 +30,7 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     has_jump = f"{comp}_jump" in components
     has_exp = f"{comp}_exp" in components
     has_log = f"{comp}_log" in components
+    has_exp_trend = f"{comp}_exp_trend" in components
 
     gs_left = gs[0, 0].subgridspec(3, 1, hspace=0.3)
     ax_main = fig.add_subplot(gs_left[0:2, 0])
@@ -43,7 +44,10 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     ax_main.legend(loc="lower left", frameon=True, framealpha=0.9)
     ax_main.grid(True, ls=":", alpha=0.6)
     
-    ax_trend.plot(idx, components[f"{comp}_trend"].values * scale, "-", lw=2.5, color="#2c3e50")
+    ax_trend.plot(idx, components[f"{comp}_trend"].values * scale, "-", lw=2.5, color="#2c3e50", label="Poly trend")
+    if has_exp_trend:
+        ax_trend.plot(idx, components[f"{comp}_exp_trend"].values * scale, "--", lw=2, color="#8e44ad", label="Exp trend")
+        ax_trend.legend(loc="lower left", fontsize=12)
     ax_trend.set_title("Long-term Trend", fontweight='bold')
     ax_trend.set_ylabel(f"Trend ({unit})")
     ax_trend.grid(True, ls=":", alpha=0.6)
@@ -124,6 +128,7 @@ def save_report(series: pd.Series, components: dict, best_model: dict, scan_tabl
         f"| Seasonal periods (yr) | {model.get('periodic', [])} |",
         f"| Jump dates | {model.get('stepDate', [])} |",
         f"| Polyline breaks | {model.get('polyline', [])} |",
+        f"| Exp trend (b/day) | {model.get('exp_trend', None)} |",
         f"| Exp relaxation | {model.get('exp', {})} |",
         f"| Log relaxation | {model.get('log', {})} |",
         f"| n_params | {stats['n_param']} |",

@@ -34,6 +34,11 @@ def create_parser():
     p_dec.add_argument("--no-relax", action="store_true", help="Skip exponential/logarithmic relaxation testing")
     p_dec.add_argument("--output-dir", default="", help="Parent dir for output folder")
     p_dec.add_argument("--cores", type=int, default=1, help="Number of CPU cores for parallel processing (default: 1)")
+    p_dec.add_argument(
+        "--exp-trend", dest="exp_trend", default=None, metavar="B_OR_AUTO",
+        help="Exponential trend component exp(-b*t)-1. Pass 'auto' to auto-detect the best decay rate, "
+             "or a numeric b value in 1/days (e.g. 0.001 ≈ 2.7-yr time constant). Omit to disable."
+    )
     
     # ---------------- RECONSTRUCT ----------------
     p_rec = subparsers.add_parser("reconstruct", help="Reconstruct 1D timeseries signal using parametric deformation modeling")

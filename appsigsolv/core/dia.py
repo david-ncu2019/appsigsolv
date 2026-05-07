@@ -105,7 +105,7 @@ def auto_detect_periods(series: pd.Series, max_periods: int = 5, min_yr: float =
     valid_peaks.sort(key=lambda x: x[1], reverse=True)
     return [round(p[0], 2) for p in valid_peaks[:max_periods]]
 
-def prescreen_periods(series: pd.Series, candidates_yr: list) -> list:
+def prescreen_periods(series: pd.Series, candidates_yr: list, cond_threshold: float = 1e8) -> list:
     values = series.values
     valid_mask = ~np.isnan(values)
     days = np.array([(d - series.index[0]).days for d in series.index])
@@ -120,7 +120,12 @@ def prescreen_periods(series: pd.Series, candidates_yr: list) -> list:
 
     accepted = []
     power_threshold = np.percentile(pgram, 90)
-    
+
+    # Baseline design matrix: normalised quadratic polynomial at valid observation days
+    t = days[valid_mask].astype(float)
+    t_max = t.max() if t.max() > 0 else 1.0
+    G_base = np.column_stack([np.ones(len(t)), t / t_max, (t / t_max)**2])
+
     for period_yr in candidates_yr:
         period_days = period_yr * 365.25
         target_f = 2*np.pi / period_days
@@ -128,18 +133,89 @@ def prescreen_periods(series: pd.Series, candidates_yr: list) -> list:
         window = pgram[max(0, idx-50):min(len(pgram), idx+51)]
         has_peak = len(window) > 0 and window.max() > power_threshold and window.max() > 0.05
 
-        if has_peak:
-            accepted.append(period_yr)
+        if not has_peak:
+            continue
+
+        # Collinearity guard: reject if adding this period raises condition number too high
+        cos_col = np.cos(2 * np.pi / period_days * t)
+        sin_col = np.sin(2 * np.pi / period_days * t)
+        extra_cols = [
+            col for p in accepted
+            for col in (np.cos(2*np.pi/(p*365.25)*t), np.sin(2*np.pi/(p*365.25)*t))
+        ]
+        G_trial = np.column_stack([G_base] + extra_cols + [cos_col, sin_col])
+        if np.linalg.cond(G_trial) > cond_threshold:
+            continue
+
+        accepted.append(period_yr)
     return accepted
+
+def _cusum_break_date(residuals: np.ndarray, dates: list, min_segment: int = 10):
+    """Return the date string of the max-CUSUM structural break, or None if not significant."""
+    n = len(residuals)
+    if n < 2 * min_segment:
+        return None
+    mu = np.mean(residuals)
+    cusum = np.cumsum(residuals - mu)
+    sigma = np.std(residuals, ddof=1)
+    if sigma < 1e-12:
+        return None
+    # Normalised CUSUM range; 1.36 is the ~95% KS critical value
+    cusum_range = (np.max(cusum) - np.min(cusum)) / (sigma * np.sqrt(n))
+    if cusum_range < 1.36:
+        return None
+    break_idx = int(np.argmax(np.abs(cusum)))
+    if break_idx < min_segment or break_idx > n - min_segment:
+        return None
+    return dates[break_idx].strftime("%Y%m%d")
+
+def auto_detect_exp_trend(series: pd.Series, b_candidates=None, aic_improvement_threshold: float = 2.0):
+    """
+    Test whether series is better described by [1, t, exp(-b*t)-1] than [1, t].
+    Returns best b_per_day (1/days) or None if no significant improvement.
+    """
+    if b_candidates is None:
+        b_candidates = np.logspace(-4, -1, 20)
+
+    s = series.dropna()
+    if len(s) < 10:
+        return None
+
+    t0 = s.index[0]
+    days = np.array([(d - t0).days for d in s.index], dtype=np.float64)
+    y = s.values.astype(np.float64)
+    n = len(y)
+
+    G_base = np.column_stack([np.ones(n), days])
+    m_base, ssr_base, _, _ = np.linalg.lstsq(G_base, y, rcond=None)
+    ssr_base = float(ssr_base[0]) if len(ssr_base) > 0 else float(np.sum((y - G_base @ m_base) ** 2))
+    aic_base = n * np.log(max(ssr_base / n, 1e-30)) + 2 * 2
+
+    best_b = None
+    best_aic = aic_base - aic_improvement_threshold
+
+    for b in b_candidates:
+        exp_col = np.exp(-b * days) - 1.0
+        G_trial = np.column_stack([np.ones(n), days, exp_col])
+        if np.linalg.cond(G_trial) > 1e10:
+            continue
+        m_trial, ssr_trial, _, _ = np.linalg.lstsq(G_trial, y, rcond=None)
+        ssr_trial = float(ssr_trial[0]) if len(ssr_trial) > 0 else float(np.sum((y - G_trial @ m_trial) ** 2))
+        aic_trial = n * np.log(max(ssr_trial / n, 1e-30)) + 2 * 3
+        if aic_trial < best_aic:
+            best_aic = aic_trial
+            best_b = b
+
+    return best_b
 
 def robust_analyze_residuals(residuals: np.ndarray, dates: list, model: dict):
     days = np.array([(d - dates[0]).days for d in dates])
     freqs = np.linspace(2*np.pi/(20*365.25), 2*np.pi/(0.2*365.25), 5000)
     pgram = lombscargle(days, residuals, freqs, normalize=True)
-    
+
     max_pwr = np.max(pgram)
     peaks, _ = find_peaks(pgram, height=max_pwr * 0.4)
-    
+
     if len(peaks) > 0 and max_pwr > 0.1:
         peak_powers = pgram[peaks]
         sorted_peaks = peaks[np.argsort(peak_powers)[::-1]]
@@ -152,12 +228,12 @@ def robust_analyze_residuals(residuals: np.ndarray, dates: list, model: dict):
     velocity = np.diff(residuals) / np.diff(days)
     dt = np.diff(days)
     valid_vel_mask = dt < np.percentile(dt, 95) if len(dt) > 10 else np.ones_like(dt, dtype=bool)
-    
+
     if valid_vel_mask.sum() > 5:
         valid_vel = velocity[valid_vel_mask]
         median_vel = np.median(valid_vel)
         mad_vel = np.median(np.abs(valid_vel - median_vel))
-        
+
         if mad_vel > 1e-12:
             min_idx = np.argmin(velocity)
             max_idx = np.argmax(velocity)
@@ -166,10 +242,23 @@ def robust_analyze_residuals(residuals: np.ndarray, dates: list, model: dict):
                 break_date = dates[extreme_idx].strftime("%Y%m%d")
                 if break_date not in model.get("polyline", []):
                     return "polyline", break_date
-            
+
+    # CUSUM-based detection for gradual accelerations not caught by velocity spike test
+    if len(residuals) >= 20:
+        cusum_break = _cusum_break_date(residuals, dates)
+        if cusum_break is not None and cusum_break not in model.get("polyline", []):
+            return "polyline", cusum_break
+
+    # Exp-trend detection: monotonic residual with decreasing rate suggests missed exp trend
+    if len(residuals) >= 20 and model.get("exp_trend") is None:
+        residual_series = pd.Series(residuals, index=pd.DatetimeIndex(dates))
+        best_b = auto_detect_exp_trend(residual_series)
+        if best_b is not None:
+            return "exp_trend", best_b
+
     return "None", None
 
-def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines, initial_logs, poly_deg, sigma_mm, alpha, max_iter):
+def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines, initial_logs, poly_deg, sigma_mm, alpha, max_iter, exp_trend_b=None):
     series_clean = series.dropna()
     if series_clean.empty:
         return None
@@ -185,6 +274,7 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines, ini
         "polyline": list(initial_polylines),
         "exp": {},
         "log": initial_logs,
+        "exp_trend": exp_trend_b,
     }
 
     last_omt = 9999.0
@@ -213,7 +303,14 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines, ini
             else:
                 adapt_type = "polyline"
                 adapt_val = None
-                
+
+        if adapt_type == "exp_trend":
+            if model.get("exp_trend") is None:
+                model["exp_trend"] = adapt_val
+            else:
+                adapt_type = "polyline"
+                adapt_val = None
+
         if adapt_type == "polyline":
             if adapt_val is None:
                 days = np.array([(d - date_list[0]).days for d in date_list])
@@ -276,8 +373,8 @@ def test_relaxation(series, jump_dates, accepted_model, alpha):
     }
     return model
 
-def _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, alpha, max_iter):
-    result = run_omt_dia_loop(series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, sigma_mm, alpha, max_iter)
+def _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, alpha, max_iter, exp_trend_b=None):
+    result = run_omt_dia_loop(series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, sigma_mm, alpha, max_iter, exp_trend_b=exp_trend_b)
     if result is not None:
         s = result["_omt_stats"]
         return result, {"sigma_mm": sigma_mm, "accepted": True, "p_value": s["p_value"],
@@ -287,7 +384,7 @@ def _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods, initial_p
                   "p_value": None, "n_param": None,
                   "n_periods": None, "n_polylines": None}
 
-def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, sigma_min, sigma_max, sigma_step, alpha, max_iter, no_relax=False, cores=1):
+def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, sigma_min, sigma_max, sigma_step, alpha, max_iter, no_relax=False, cores=1, exp_trend_b=None):
     sigmas = np.arange(sigma_min, sigma_max + sigma_step * 0.5, sigma_step)
     scan_results = []
     scan_table = []
@@ -295,7 +392,7 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
     if cores > 1:
         import concurrent.futures
         from functools import partial
-        worker = partial(_run_single_sigma, series=series, jump_dates=jump_dates, candidate_periods=candidate_periods, initial_polylines=initial_polylines, initial_logs=initial_logs, poly_deg=poly_deg, alpha=alpha, max_iter=max_iter)
+        worker = partial(_run_single_sigma, series=series, jump_dates=jump_dates, candidate_periods=candidate_periods, initial_polylines=initial_polylines, initial_logs=initial_logs, poly_deg=poly_deg, alpha=alpha, max_iter=max_iter, exp_trend_b=exp_trend_b)
         with concurrent.futures.ProcessPoolExecutor(max_workers=cores) as executor:
             for result, table_row in executor.map(worker, sigmas):
                 scan_table.append(table_row)
@@ -303,7 +400,7 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
                     scan_results.append(result)
     else:
         for sigma_mm in sigmas:
-            result, table_row = _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, alpha, max_iter)
+            result, table_row = _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods, initial_polylines, initial_logs, poly_deg, alpha, max_iter, exp_trend_b=exp_trend_b)
             scan_table.append(table_row)
             if result is not None:
                 scan_results.append(result)
@@ -311,7 +408,7 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
     if not scan_results:
         return None, scan_table
 
-    best = min(scan_results, key=lambda m: (m["_omt_stats"]["sigma_mm"], m["_omt_stats"]["n_param"], -m["_omt_stats"]["p_value"]))
+    best = min(scan_results, key=lambda m: (m["_omt_stats"]["n_param"], -m["_omt_stats"]["sigma_mm"], -m["_omt_stats"]["p_value"]))
     if not no_relax:
         best = test_relaxation(series, jump_dates, best, alpha)
     return best, scan_table
