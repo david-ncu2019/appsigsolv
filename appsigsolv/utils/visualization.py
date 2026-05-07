@@ -35,7 +35,7 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     ax_main = fig.add_subplot(gs_left[0:2, 0])
     ax_trend = fig.add_subplot(gs_left[2, 0], sharex=ax_main)
 
-    ax_main.plot(idx, series.values * scale, "o", ms=2, alpha=0.3, color="#95a5a6", label="Observed")
+    ax_main.plot(idx, series.values * scale, "o", ms=5, alpha=0.75, color="#95a5a6", label="Observed")
     ax_main.plot(idx, components[f"{comp}_model"].values * scale, "-", lw=2, color="#e74c3c", label="Model")
     stats = best_model.get("_omt_stats", {"sigma_mm": 1.0, "p_value": 1.0, "n_param": 1})
     ax_main.set_title(f"{stem} {comp}: Observed vs. Model", fontweight='bold')
@@ -141,7 +141,7 @@ def save_report(series: pd.Series, components: dict, best_model: dict, scan_tabl
     series_clean = series.dropna()
     orig_var = np.var(series_clean.values)
     for col, s in components.items():
-        if col in (f"{comp}_model", f"{comp}_noise"):
+        if col in (f"{comp}_model", f"{comp}_noise", f"{comp}_wtest"):
             continue
         s_clean = s.reindex(series_clean.index)
         pct = (np.var(s_clean.values) / orig_var * 100) if orig_var > 0 else 0.0

@@ -30,9 +30,22 @@ def load_and_preprocess(csv_path: str, component: str, date_col: str = "", unit:
     if unit == 'mm':
         series = series / 1000.0  
 
-    median = series.median()
-    mad = median_abs_deviation(series.dropna(), scale="normal")
-    outliers = np.abs(series - median) > mad_threshold * mad
+    # Detrend before MAD: avoids flagging the long-term trend itself as outliers
+    s_clean = series.dropna()
+    if len(s_clean) >= 2:
+        days_num = np.array([(d - s_clean.index[0]).days for d in s_clean.index], dtype=float)
+        linear_fit = np.polyfit(days_num, s_clean.values, 1)
+        trend_vals = np.polyval(linear_fit, days_num)
+        residuals_for_mad = s_clean.values - trend_vals
+        mad = median_abs_deviation(residuals_for_mad, scale="normal")
+        days_full = np.array([(d - s_clean.index[0]).days for d in series.index], dtype=float)
+        trend_full = np.polyval(linear_fit, days_full)
+        detrended_full = series.values - trend_full
+        outliers = np.abs(detrended_full) > mad_threshold * mad
+    else:
+        median = series.median()
+        mad = median_abs_deviation(s_clean, scale="normal")
+        outliers = np.abs(series - median) > mad_threshold * mad
     series[outliers] = np.nan
     print(f"  [preprocess] {component}: {outliers.sum()} outliers removed")
 
