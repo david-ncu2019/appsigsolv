@@ -26,6 +26,7 @@ This guide covers installation, both CLI commands, input/output formats, interpr
 `appsigsolv` fits a **parametric signal model** to a geodetic or geophysical timeseries and decomposes it into physically meaningful components:
 
 - **Long-term trend** — polynomial (offset, linear velocity, acceleration)
+- **Exponential decay trend** — monotonic decay shape `a·(exp(-b·t)−1)` for compaction or relaxation signals that asymptote toward a plateau
 - **Seasonal signals** — sinusoidal waves at user-specified or auto-detected periods
 - **Jumps** — instantaneous step changes from earthquakes, equipment changes, etc.
 - **Polyline breaks** — changes in velocity rate (piecewise linear)
@@ -82,18 +83,18 @@ All examples in this guide assume this is your working directory.
 python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component dU
 ```
 
-**Decompose all components in a file:**
+**Decompose all components in a file (Batch Mode):**
 
 ```bash
 python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component all
 ```
 
-**Reconstruct a modeled timeseries from a saved JSON config:**
+**Reconstruct at specific days of every month:**
 
 ```bash
 python -m appsigsolv reconstruct gps_timeseries/TKJS_neu.csv \
     --json gps_timeseries/TKJS_neu/TKJS_neu_model_dU.json \
-    --target-col dU --daily
+    --target-col dU --sampling-rate custom --custom-dates 1,6,11,16,21,26
 ```
 
 ---
@@ -160,7 +161,7 @@ python -m appsigsolv decompose <input_csv> [OPTIONS]
 | `--jumps` | | Extra jump dates to force: `YYYY-MM-DD,YYYY-MM-DD,...` |
 | `--polylines` | | Extra polyline break dates: `YYYY-MM-DD,YYYY-MM-DD,...` |
 | `--logs` | | Log relaxation terms: `YYYY-MM-DD:tau_days,...` |
-| `--poly-deg` | `1` | Polynomial degree: `0`=offset only, `1`=linear trend, `2`=acceleration |
+| `--poly-deg` | `1` | Polynomial degree: `0`=offset only, `1`=linear trend, `2`=acceleration. Use `-1` for auto-selection. |
 | `--periods` | `0.25,0.5,1.0,2.0` | Candidate periods (years) always included in the model search |
 | `--auto-periods` | `5` | Auto-detect up to N additional dominant periods via Lomb-Scargle |
 | `--sigma-min` | `2.0` | Start of sigma scan in mm |
@@ -173,6 +174,11 @@ python -m appsigsolv decompose <input_csv> [OPTIONS]
 | `--no-relax` | *(flag)* | Skip exponential/log relaxation testing after model acceptance |
 | `--output-dir` | *(same folder as CSV)* | Parent directory for outputs |
 | `--cores` | `1` | Number of CPU cores for parallel sigma scan |
+| `--exp-trend` | *(off)* | Exponential decay trend `exp(-b·t)−1`. Pass `auto` to auto-detect the best decay rate via AIC, or a numeric `b` in 1/days (e.g. `0.001` ≈ 2.7-yr time constant). Omit to disable. |
+
+### Resumption Capability
+
+`decompose` now supports automatic resumption. If a batch run is interrupted, re-running the same command will automatically skip any components that already have a corresponding `{stem}_model_{comp}.json` file in the output directory. This ensures that only new or incomplete components are processed, saving significant time.
 
 ### Outputs
 
@@ -189,11 +195,7 @@ Results are saved in `<output_dir>/<csv_stem>/` (e.g., `gps_timeseries/TKJS_neu/
 
 ## 6. Command: `reconstruct`
 
-The `reconstruct` command fits a **user-specified** model (either from a JSON file or CLI flags) to a timeseries and saves the fitted curve. Use this to:
-
-- Apply a known model from `decompose` to new data
-- Build a specific parametric model manually and fit it
-- Forward-model on a dense daily grid
+The `reconstruct` command fits a **user-specified** model (either from a JSON file or CLI flags) to a timeseries and saves the fitted curve. 
 
 ### Syntax
 
@@ -211,24 +213,29 @@ python -m appsigsolv reconstruct <input_file> [OPTIONS]
 | `--target-col` | *(auto)* | Override auto-detected displacement column |
 | `--unit` | `mm` | Input unit: `mm` or `m` |
 | `--poly` | | Polynomial degree |
-| `--period` | | Periodic component in years (repeatable: `--period 0.5 --period 1.0`) |
+| `--period` | | Periodic component in years (repeatable) |
 | `--step` | | Jump step date `YYYYMMDD` (repeatable) |
 | `--polyline` | | Polyline break date `YYYYMMDD` (repeatable) |
 | `--exp DATE TAU` | | Exponential term: onset date `YYYYMMDD` and tau in days (repeatable) |
 | `--log DATE TAU` | | Logarithmic term: onset date `YYYYMMDD` and tau in days (repeatable) |
-| `-o` / `--output` | `<input>_modeled.<ext>` | Output file path |
-| `--daily` | *(flag)* | Output on a dense daily grid instead of at observation times |
+| `--exp-trend B` | *(off)* | Exponential decay trend `b` value in 1/days. Loaded automatically when using `--json` from `decompose`. |
+| `-o` / `--output` | *(auto)* | Output file path |
+| `--sampling-rate` | *(none)* | Set to `daily` for every day, or `custom` for specific days of each month |
+| `--custom-dates` | *(none)* | Comma-separated day numbers (1–31) used with `--sampling-rate custom` |
 | `--ref-date` | *(first date)* | Reference epoch for model `YYYYMMDD` |
+
+### Custom Sampling
+
+When using `--sampling-rate custom`, you must provide `--custom-dates`. For example, `--custom-dates 1,15` will produce modeled values for the 1st and 15th of every month within the timeseries range. Day values exceeding the length of a specific month (e.g., 31 in February) are automatically clamped to the last day of that month.
 
 ### Output
 
-A single CSV (or Excel) identical to the input plus:
-- `modeled` column — fitted model values in metres
-- (with `--daily`) `reconstructed` column — dense daily model
+A single CSV (or Excel) containing:
+- `date` column
+- `modeled` column (if sampling at original observation times)
+- `reconstructed` column (if using `daily` or `custom` sampling)
 
-### CLI flags override JSON
-
-If you load `--json` and also pass `--poly`, `--period`, etc., the CLI flags take precedence over the JSON values. This lets you load a base model and tweak it without editing the JSON file.
+The output filename will automatically include a suffix like `_daily`, `_custom`, or `_modeled` if `--output` is not specified.
 
 ---
 
@@ -243,15 +250,12 @@ If you load `--json` and also pass `--poly`, `--period`, etc., the CLI flags tak
     "stepDate": ["20220617"],
     "polyline": [],
     "exp": {},
-    "log": {}
+    "log": {},
+    "exp_trend": null
 }
 ```
 
-- `polynomial`: degree of the trend (0, 1, or 2)
-- `periodic`: list of accepted period lengths in years
-- `stepDate`: list of jump dates in `YYYYMMDD` format
-- `polyline`: list of velocity-change dates
-- `exp` / `log`: dict of `{"YYYYMMDD": tau_days}` for relaxation terms
+If an exponential decay trend was detected, `exp_trend` will hold the fitted `b` value (in 1/days) instead of `null`, for example `"exp_trend": 0.000616`. This value is automatically used by `reconstruct --json`.
 
 This file is directly usable as `--json` input to `reconstruct`.
 
@@ -264,6 +268,7 @@ All values are in **metres**. Each row is one date.
 | `date` | ISO date |
 | `<comp>` | Observed displacement |
 | `<comp>_trend` | Polynomial trend component |
+| `<comp>_exp_trend` | Exponential decay trend `a·(exp(-b·t)−1)` (only present when detected or specified) |
 | `<comp>_<T>yr` | Seasonal component at period T years |
 | `<comp>_jump` | Cumulative step function (if jumps present) |
 | `<comp>_exp_<date>` | Exponential relaxation term (if present) |
@@ -271,31 +276,7 @@ All values are in **metres**. Each row is one date.
 | `<comp>_model` | Sum of all model components (fitted values) |
 | `<comp>_noise` | Residual = observed − model |
 | `<comp>_wtest` | Normalised w-statistic per observation |
-| `flagged` | `True` when `\|w-test\| > 3.29` (anomalous observation) |
-
-### 7.3 Diagnostic Figure
-
-The PNG has a two-panel layout:
-
-- **Left panel:**
-  - Upper 2/3 — Observed (scatter) vs. Model (line) in mm
-  - Lower 1/3 — Long-term trend only
-
-- **Right panel** — dynamically stacked subplots showing whichever of these are present:
-  - Seasonal components
-  - Jumps & relaxation terms
-  - Residual noise with flagged anomalies highlighted
-
-The figure title shows the accepted sigma, p-value, number of parameters, and polynomial degree.
-
-### 7.4 Statistical Report
-
-A Markdown file with four sections:
-
-1. **Accepted Model** — all model parameters, OMT statistic, p-value, DIA iterations used
-2. **Variance Explained per Component** — std (mm) and % variance for each component
-3. **Sigma Scan Summary** — table showing accepted/rejected sigma values with p-values
-4. **Anomalous Observations** — dates where `|w-stat| > 3.29` with residual size in mm
+| `flagged` | `True` when `|w-test| > 3.29` (anomalous observation) |
 
 ---
 
@@ -303,140 +284,92 @@ A Markdown file with four sections:
 
 ### Sigma (σ) — "Expectation of Messiness"
 
-Sigma is your assumed measurement noise — how much random scatter you expect in a single daily observation. The tool does not require you to know this value in advance; instead it **scans a range** of sigma values and finds the smallest one for which the model statistically fits the data.
-
-A smaller accepted sigma means the data is clean and the model explains it well. A large accepted sigma means there is substantial scatter or un-modeled signal.
+Sigma is your assumed measurement noise. The tool scans a range and finds the smallest sigma for which the model statistically fits the data.
 
 ### p-value — "Does the Overall Model Fit?"
 
-The Overall Model Test (OMT) computes a chi-squared statistic from the sum of squared residuals and asks: *given our assumed sigma, is this level of misfit plausible by random chance alone?*
-
 - **p-value ≥ 0.05** → model **accepted** (misfit is within expectations)
-- **p-value < 0.05** → model **rejected** (misfit is too large; the model is missing something)
-
-The DIA loop then adds model terms (a new period or a velocity break) and retests until acceptance.
+- **p-value < 0.05** → model **rejected** (misfit is too large)
 
 ### w-statistic — "Is This Specific Point an Outlier?"
 
-For each observation: `w = residual / sigma`
+For each observation: `w = residual / sigma`. If `|w| > 3.29`, the point is flagged as an anomaly.
 
-- `|w| > 3.29` → the observation is flagged as anomalous (0.1% probability under the null)
-- Flagged observations appear in the `flagged` column of the CSV and in the report table
+### Exponential Decay Trend — "What is it?"
 
-Flagged points are **not removed** from the fit — they are retained and reported so you can decide their cause (instrument spike, real geophysical event, data error).
+Some signals do not increase or decrease at a steady rate — they start fast and then slow down, asymptoting toward a final plateau. Groundwater compaction and post-pumping recovery are typical examples.
 
-### DIA Loop — How the Model Is Built Automatically
+The model used is:
 
-1. Fit model → compute OMT p-value
-2. If p-value < 0.05 (rejected): call Lomb-Scargle on residuals to find the strongest unmodeled frequency, or check for a velocity-break pattern
-3. Add the identified term to the model and re-fit
-4. Repeat up to `--max-iter` times per sigma value
-5. If still rejected after max iterations: try the next sigma value and restart
+```
+displacement(t) = a · (exp(-b · t) − 1)
+```
 
-The first sigma (starting from `--sigma-min`) that achieves acceptance is selected as the final model. In case of ties, the model with the fewest parameters wins; if still tied, the highest p-value wins.
+- `a` — the amplitude (total displacement at infinite time, in metres)
+- `b` — the decay rate in 1/days. Larger `b` means faster convergence. The time constant τ = 1/b.
+- At `t = 0`: displacement = 0 (anchored to the first observation)
 
-### Relaxation Testing
-
-After acceptance, if `--no-relax` is not set, the tool tests whether adding an exponential relaxation term after each detected jump improves the model (tau = 30, 90, or 180 days). This captures post-seismic or hydrological aftereffects.
+Because `b` is fixed before OLS fitting (amplitude `a` is solved linearly), this component integrates cleanly with the OMT statistical framework. When using `--exp-trend auto`, the tool scans 20 candidate `b` values and selects the one with the lowest AIC improvement over a plain linear model (threshold ΔAIC > 2).
 
 ---
 
 ## 9. Worked Examples
 
-### Example 1 — GPS Up Component (Standard)
+### Example 1 — Batch Processing with Resumption
 
 ```bash
-python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component dU
+python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component all --cores 4
 ```
 
-Default settings: linear trend (`--poly-deg 1`), candidate periods 0.25, 0.5, 1.0, 2.0 yr plus up to 5 auto-detected, sigma scan from 2 to 15 mm.
+Processes all columns in parallel. If interrupted, re-running this command will skip already completed components.
 
-**Expected outputs in `gps_timeseries/TKJS_neu/`:**
-- `TKJS_neu_model_dU.json`
-- `TKJS_neu_decomposed_dU.csv`
-- `TKJS_neu_decomposed_dU.png`
-- `TKJS_neu_report_dU.md`
+### Example 2 — Custom Reconstruction for Comparison
 
-### Example 2 — All Three GPS Components in Parallel
-
-```bash
-python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv \
-    --component all \
-    --cores 4
-```
-
-Processes `dN`, `dE`, `dU` (and any other non-date columns) simultaneously using 4 CPU cores for the sigma scan.
-
-### Example 3 — GPS with a Known Earthquake Jump
-
-If a Mw 6.2 earthquake occurred on 2022-06-17 and you want to force a jump regardless of auto-detection:
-
-```bash
-python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv \
-    --component dU \
-    --jumps 2022-06-17
-```
-
-### Example 4 — GPS with Acceleration (Quadratic Trend)
-
-For a station showing clear acceleration (e.g., accelerating subsidence):
-
-```bash
-python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv \
-    --component dU \
-    --poly-deg 2
-```
-
-### Example 5 — MLCW Irregular Data
-
-```bash
-python -m appsigsolv decompose mlcw_timeseries/TUKU_ringbyring.csv \
-    --component all \
-    --irregular \
-    --unit mm \
-    --poly-deg 1 \
-    --no-relax
-```
-
-`--irregular` is required because observations are approximately monthly, not daily. `--component all` processes every depth layer column.
-
-### Example 6 — Widen the Sigma Scan
-
-If your data has high noise (e.g., InSAR coherence issues) and the default scan (2–15 mm) never finds an accepted model, extend the range:
-
-```bash
-python -m appsigsolv decompose my_insar.csv \
-    --component displacement \
-    --sigma-min 5.0 \
-    --sigma-max 30.0 \
-    --sigma-step 1.0
-```
-
-### Example 7 — Reconstruct from a Saved JSON Model
-
-After `decompose` produces `TKJS_neu_model_dU.json`, apply the same model to produce a dense daily reconstruction:
+After `decompose` produces a model, reconstruct it on exactly the 1st and 15th of every month:
 
 ```bash
 python -m appsigsolv reconstruct gps_timeseries/TKJS_neu.csv \
     --json gps_timeseries/TKJS_neu/TKJS_neu_model_dU.json \
     --target-col dU \
-    --daily \
-    -o results/TKJS_neu_daily_model.csv
+    --sampling-rate custom \
+    --custom-dates 1,15 \
+    -o results/TKJS_semi_monthly.csv
 ```
 
-### Example 8 — Manual Model with `reconstruct`
+### Example 3 — MLCW Column with Exponential Decay Trend
 
-Manually specify a linear trend + annual + semi-annual + one jump, without running the full DIA pipeline:
+For compaction-well data where a layer shows a monotonic exponential-decay shape (e.g., rapid early compaction tapering off over years), use `--exp-trend auto` to let the tool find the best decay rate:
 
 ```bash
-python -m appsigsolv reconstruct gps_timeseries/TKJS_neu.csv \
-    --target-col dU \
-    --poly 1 \
-    --period 1.0 \
-    --period 0.5 \
-    --step 20220617 \
-    -o results/TKJS_manual_model.csv
+python -m appsigsolv decompose XIGANG_ringbyring.csv \
+    --component 102.096 \
+    --date-col datetime \
+    --unit mm \
+    --poly-deg -1 \
+    --periods 0.5,1 \
+    --auto-periods 5 \
+    --sigma-min 1.0 \
+    --sigma-max 30.0 \
+    --sigma-step 0.5 \
+    --irregular \
+    --no-relax \
+    --exp-trend auto \
+    --output-dir ./MLCW_decomposition
 ```
+
+The exponential trend component (`<comp>_exp_trend`) will appear in the decomposed CSV and as a dashed purple line in the trend panel of the diagnostic plot. The fitted `b` value is recorded in the JSON and the report.
+
+To then reconstruct at specific dates using the accepted model:
+
+```bash
+python -m appsigsolv reconstruct XIGANG_ringbyring.csv \
+    --json MLCW_decomposition/XIGANG_ringbyring/XIGANG_ringbyring_model_102.096.json \
+    --target-col 102.096 \
+    --sampling-rate custom \
+    --custom-dates 1,15
+```
+
+The `exp_trend` key in the JSON is picked up automatically — no extra flags needed.
 
 ---
 
@@ -444,45 +377,16 @@ python -m appsigsolv reconstruct gps_timeseries/TKJS_neu.csv \
 
 ### When should I use `--irregular`?
 
-Use `--irregular` whenever your observations are **not daily**: MLCW monthly surveys, InSAR with variable revisit time, or any timeseries where resampling to a daily grid would create too many synthetic points. Without this flag, the tool resamples to daily and fills gaps up to 7 days, which is appropriate for GPS but not for coarser data.
+Use `--irregular` whenever your observations are **not daily** (e.g., MLCW or monthly InSAR). It prevents the tool from creating excessive synthetic points via resampling.
 
-### The sigma scan never finds an accepted model — what do I do?
+### How does automatic polynomial selection work?
 
-1. **Extend the sigma range**: use a larger `--sigma-max` (e.g., 30 or 50 mm).
-2. **Add more iterations**: `--max-iter 10` gives the DIA loop more chances to add model terms.
-3. **Force known jumps**: if you know an event date, add it with `--jumps YYYY-MM-DD` so the tool does not have to auto-detect it.
-4. **Add a polyline**: if there is a known velocity change, use `--polylines YYYY-MM-DD`.
-5. **Check the data**: very large data gaps or systematic seasonal patterns not well-represented by sinusoids may prevent acceptance.
-
-### What does `--component all` do exactly?
-
-It reads every column name from the CSV header (excluding the auto-detected date column) and runs the full decompose pipeline independently on each one. Output files are named per component. For MLCW data with dozens of depth layers, this is a convenient batch mode.
-
-### Can I reload and re-apply a model JSON from a previous run?
-
-Yes. The JSON produced by `decompose` is the direct input format for `reconstruct --json`. You can also edit the JSON manually (e.g., add or remove a period value) and then reload it.
-
-### How do I interpret very high w-statistics (e.g., w > 10)?
-
-A w-statistic of 10+ means that observation is roughly 10× farther from the model than expected by noise. Common causes:
-- A data transcription error (wrong unit, sign flip)
-- A real but unmodeled abrupt event (earthquake, instrument swap)
-- The sigma is too small (the tool still accepted the model at this sigma, but individual points are extreme)
-
-The `flagged` column in the CSV marks all such points (`|w| > 3.29`). They remain in the fit; removal is left to user judgment.
-
-### Can I use `reconstruct` on a different station with the same model?
-
-Yes — load the JSON from station A and point `reconstruct` at station B's CSV. The model structure (periods, polynomial degree, jump dates) will be applied to the new data. This is useful for comparing stations or forcing a reference model.
+If you pass `--poly-deg -1`, the tool will test degrees 0, 1, and 2. It selects the one that results in an accepted model with the fewest parameters.
 
 ### Output CSV units vs. input units
 
-Input data is assumed to be in mm (or m if `--unit m`). All output CSV columns (including components) are in **metres**. Multiply by 1000 to convert back to mm for plotting or comparison.
-
-### Parallelisation (`--cores`)
-
-The sigma scan is embarrassingly parallel (each sigma value is independent). Setting `--cores 4` can reduce runtime by ~4× for wide sigma ranges. On Windows, make sure your script is called from a `if __name__ == "__main__":` guard if embedding the call in a script (not required when using the CLI directly).
+Input is mm (or m if `--unit m`). **All output CSV columns are in metres.**
 
 ---
 
-*Package version: 0.1.0 | appsigsolv — Applied Signal Solver*
+*Package version: 0.2.0 | appsigsolv — Applied Signal Solver*

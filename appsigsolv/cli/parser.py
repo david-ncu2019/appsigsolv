@@ -53,6 +53,11 @@ def create_parser():
     p_rec.add_argument("--polyline", nargs="*", help="Polyline break dates in YYYYMMDD")
     p_rec.add_argument("--exp", nargs=2, action="append", metavar=("DATE", "TAU"), help="Exponential: onset (YYYYMMDD) and tau (days)")
     p_rec.add_argument("--log", nargs=2, action="append", metavar=("DATE", "TAU"), help="Logarithmic: onset (YYYYMMDD) and tau (days)")
+    p_rec.add_argument(
+        "--exp-trend", dest="exp_trend", default=None, type=float, metavar="B",
+        help="Exponential trend b value in 1/days for exp(-b*t)-1 component (e.g. 0.001). "
+             "Loaded automatically from --json if present."
+    )
     p_rec.add_argument("-o", "--output", dest="outfile", help="Output file name")
     p_rec.add_argument(
         "--sampling-rate",

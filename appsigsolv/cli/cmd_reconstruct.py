@@ -39,7 +39,8 @@ def run_reconstruct(args):
         'stepDate': [],
         'polyline': [],
         'exp': {},
-        'log': {}
+        'log': {},
+        'exp_trend': None,
     }
     
     if args.json_file:
@@ -62,6 +63,10 @@ def run_reconstruct(args):
             onset_key = onset.replace('-', '')
             if onset_key not in model['log']: model['log'][onset_key] = []
             model['log'][onset_key].append(float(tau))
+
+    exp_trend_arg = getattr(args, "exp_trend", None)
+    if exp_trend_arg is not None:
+        model['exp_trend'] = float(exp_trend_arg)
 
     print(f"Fitting model: {model}")
     try:
