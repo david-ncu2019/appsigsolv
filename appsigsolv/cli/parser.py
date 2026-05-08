@@ -23,7 +23,10 @@ def create_parser():
     p_dec.add_argument("--logs", default="", help="Extra log relaxation dates YYYY-MM-DD:tau,YYYY-MM-DD:tau")
     p_dec.add_argument("--poly-deg", type=int, default=1,
                        help="Polynomial degree for trend: 0=offset, 1=linear, 2=accel, 3=cubic. "
-                            "Use -1 to auto-select the best degree from [0,1,2,3] (fewest params that passes OMT). (default: 1)")
+                            "Use -1 to auto-select the best degree from [poly-deg-min,3] (fewest params that passes OMT). (default: 1)")
+    p_dec.add_argument("--poly-deg-min", type=int, default=0, dest="poly_deg_min",
+                       help="Minimum polynomial degree when using --poly-deg -1 (default: 0). "
+                            "Set to 1 to exclude offset-only models, 2 to require at least acceleration.")
     p_dec.add_argument("--periods", default="0.25,0.5,1.0,2.0", help="Candidate periods in years (default: 0.25,0.5,1.0,2.0)")
     p_dec.add_argument("--auto-periods", type=int, default=5, help="Auto-detect up to N additional dominant periods (default: 5)")
     p_dec.add_argument("--sigma-min", type=float, default=2.0, help="Min sigma (default 2.0)")

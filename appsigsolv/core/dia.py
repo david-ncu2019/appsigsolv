@@ -330,7 +330,8 @@ def _w_test_for_candidate(residuals: np.ndarray, G: np.ndarray, sigma_m: float,
 # ---------------------------------------------------------------------------
 
 def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
-                                G: np.ndarray, sigma_m: float, alpha: float):
+                                G: np.ndarray, sigma_m: float, alpha: float,
+                                days: np.ndarray = None, freqs: np.ndarray = None):
     """
     Teunissen Identification phase: evaluate all candidate alternative
     hypotheses with formal w-tests and return the one with max|w|.
@@ -345,6 +346,11 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
     Selection rule (Teunissen): adapt on candidate i* = argmax_i |w_i|,
     provided |w_{i*}| > z_{α/2}  (two-tailed normal critical value).
 
+    Parameters
+    ----------
+    days  : pre-computed day-offset array (loop-invariant); computed here if None
+    freqs : pre-computed Lomb-Scargle frequency grid (loop-invariant); computed here if None
+
     Returns
     -------
     (adapt_type, adapt_val, max_w_abs)
@@ -352,7 +358,8 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
         adapt_val  : the value to add to the model (period_yr, date_str, b_val, or epoch_idx)
         max_w_abs  : absolute w-statistic of winning hypothesis
     """
-    days = np.array([(d - dates[0]).days for d in dates], dtype=float)
+    if days is None:
+        days = np.array([(d - dates[0]).days for d in dates], dtype=float)
     n = len(residuals)
     z_crit = norm.ppf(1.0 - alpha / 2.0)   # two-tailed critical value
 
@@ -371,7 +378,8 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
 
     # --- Hypothesis group 2: missing periodic signal ------------------------
     if n >= 20:
-        freqs = np.linspace(2*np.pi/(20*365.25), 2*np.pi/(0.2*365.25), 5000)
+        if freqs is None:
+            freqs = np.linspace(2*np.pi/(20*365.25), 2*np.pi/(0.2*365.25), 500)
         pgram = lombscargle(days, residuals, freqs, normalize=True)
         max_pwr = np.max(pgram)
         peaks, _ = find_peaks(pgram, height=max_pwr * 0.4)
@@ -573,6 +581,12 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines,
         "exp_trend": exp_trend_b,
     }
 
+    # Pre-compute loop-invariant arrays for _identify_best_alternative
+    _days_arr = np.array([(d - date_list[0]).days for d in date_list], dtype=float)
+    _n = len(dis_ts)
+    # Frequency grid: 500 points is sufficient to resolve peaks; 5000 was wasteful for long series
+    _freqs_arr = np.linspace(2*np.pi/(20*365.25), 2*np.pi/(0.2*365.25), 500) if _n >= 20 else None
+
     last_unit_var = 9999.0
     for iteration in range(max_iter):
 
@@ -608,7 +622,8 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines,
 
         # --- IDENTIFICATION (formal w-test per Teunissen) ---
         adapt_type, adapt_val, max_w = _identify_best_alternative(
-            residuals, date_list, model, G, sigma_m, alpha
+            residuals, date_list, model, G, sigma_m, alpha,
+            days=_days_arr, freqs=_freqs_arr
         )
 
         # --- ADAPTATION ---

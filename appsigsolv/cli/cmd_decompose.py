@@ -111,7 +111,8 @@ def run_decompose(args):
                     print(f"  [exp-trend] Warning: could not parse '{exp_trend_arg}' as float. Disabling exp-trend.")
                     exp_trend_b = None
 
-            candidate_degrees = [0, 1, 2, 3] if args.poly_deg == -1 else [args.poly_deg]
+            poly_deg_min = getattr(args, "poly_deg_min", 0)
+            candidate_degrees = list(range(poly_deg_min, 4)) if args.poly_deg == -1 else [args.poly_deg]
             best_overall_model = None
             best_overall_scan_table = []
 
