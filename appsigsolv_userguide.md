@@ -14,10 +14,11 @@ This guide covers installation, both CLI commands, input/output formats, interpr
 4. [Input Data Formats](#4-input-data-formats)
 5. [Command: `decompose`](#5-command-decompose)
 6. [Command: `reconstruct`](#6-command-reconstruct)
-7. [Understanding the Outputs](#7-understanding-the-outputs)
-8. [Statistical Concepts (Plain Language)](#8-statistical-concepts-plain-language)
+7. [Understanding the Outputs](#7-understanding-the-outputs) *(7.1 JSON · 7.2 CSV · 7.3 Report fields)*
+8. [Statistical Concepts (Plain Language)](#8-statistical-concepts-plain-language) *(OMT · T_stat · chi2_critical · unit_var_factor · sigma_hat · w-test · DIA)*
 9. [Worked Examples](#9-worked-examples)
 10. [Tips, Gotchas & FAQ](#10-tips-gotchas--faq)
+11. [Changelog](#11-changelog)
 
 ---
 
@@ -89,6 +90,12 @@ python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component dU
 python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component all
 ```
 
+**Re-process a specific component, overwriting an existing result:**
+
+```bash
+python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component dU --force
+```
+
 **Reconstruct at specific days of every month:**
 
 ```bash
@@ -132,10 +139,12 @@ datetime,8.775,11.938,25.605,39.545,...
 - Remaining columns: layer depths (numeric column names, values in mm)
 - Use `--irregular` flag to skip daily resampling (essential for this format)
 
+**Numeric column names** (e.g. `86.15899999999999`) are automatically normalised to 3 decimal places (`86.159`) in all output filenames, JSON keys, and CSV headers to avoid floating-point precision artefacts in file names.
+
 ### 4.3 Units
 
 - Default input unit: `mm` (millimetres)
-- Internal computation unit: `m` (metres) — all output CSVs are in metres
+- Internal computation unit: `m` (metres) — all output CSVs are back-scaled to `mm`
 - Use `--unit m` if your input is already in metres
 
 ---
@@ -161,7 +170,7 @@ python -m appsigsolv decompose <input_csv> [OPTIONS]
 | `--jumps` | | Extra jump dates to force: `YYYY-MM-DD,YYYY-MM-DD,...` |
 | `--polylines` | | Extra polyline break dates: `YYYY-MM-DD,YYYY-MM-DD,...` |
 | `--logs` | | Log relaxation terms: `YYYY-MM-DD:tau_days,...` |
-| `--poly-deg` | `1` | Polynomial degree: `0`=offset only, `1`=linear trend, `2`=acceleration. Use `-1` for auto-selection. |
+| `--poly-deg` | `1` | Polynomial degree: `0`=offset only, `1`=linear trend, `2`=acceleration, `3`=cubic. Use `-1` to auto-select the degree with the tightest passing sigma (0–3). |
 | `--periods` | `0.25,0.5,1.0,2.0` | Candidate periods (years) always included in the model search |
 | `--auto-periods` | `5` | Auto-detect up to N additional dominant periods via Lomb-Scargle |
 | `--sigma-min` | `2.0` | Start of sigma scan in mm |
@@ -172,13 +181,28 @@ python -m appsigsolv decompose <input_csv> [OPTIONS]
 | `--irregular` | *(flag)* | Skip daily resampling — required for MLCW or non-daily data |
 | `--no-plot` | *(flag)* | Skip PNG figure generation |
 | `--no-relax` | *(flag)* | Skip exponential/log relaxation testing after model acceptance |
+| `--force` | *(flag)* | **Overwrite existing results.** By default, components with an existing `_model_<comp>.json` are skipped. Use `--force` to re-process them (e.g. when you want to try different parameters on a component). |
 | `--output-dir` | *(same folder as CSV)* | Parent directory for outputs |
 | `--cores` | `1` | Number of CPU cores for parallel sigma scan |
 | `--exp-trend` | *(off)* | Exponential decay trend `exp(-b·t)−1`. Pass `auto` to auto-detect the best decay rate via AIC, or a numeric `b` in 1/days (e.g. `0.001` ≈ 2.7-yr time constant). Omit to disable. |
 
-### Resumption Capability
+### Resumption and Overwrite Behaviour
 
-`decompose` now supports automatic resumption. If a batch run is interrupted, re-running the same command will automatically skip any components that already have a corresponding `{stem}_model_{comp}.json` file in the output directory. This ensures that only new or incomplete components are processed, saving significant time.
+By default, `decompose` **skips** any component that already has a `{stem}_model_{comp}.json` in the output directory. This means:
+
+- **Interrupted batch runs** can be safely re-started — already-processed components are skipped automatically.
+- **Manual re-processing** requires `--force` to overwrite an existing result.
+
+```bash
+# Skip already-done components (default behaviour)
+python -m appsigsolv decompose station.csv --component all ...
+
+# Overwrite a specific unsatisfactory result
+python -m appsigsolv decompose station.csv --component 86.159 --force --poly-deg 2 ...
+
+# Re-run all components from scratch
+python -m appsigsolv decompose station.csv --component all --force ...
+```
 
 ### Outputs
 
@@ -187,7 +211,7 @@ Results are saved in `<output_dir>/<csv_stem>/` (e.g., `gps_timeseries/TKJS_neu/
 | File | Description |
 |---|---|
 | `<stem>_model_<comp>.json` | Accepted model configuration (reusable with `reconstruct`) |
-| `<stem>_decomposed_<comp>.csv` | All decomposed signal components (in metres) |
+| `<stem>_decomposed_<comp>.csv` | All decomposed signal components (displacement in mm) |
 | `<stem>_decomposed_<comp>.png` | Diagnostic figure |
 | `<stem>_report_<comp>.md` | Statistical summary report |
 
@@ -261,7 +285,7 @@ This file is directly usable as `--json` input to `reconstruct`.
 
 ### 7.2 Decomposed CSV
 
-All values are in **metres**. Each row is one date.
+All displacement values are in **millimetres** (mm). The `_wtest` and `flagged` columns are dimensionless. Each row is one date.
 
 | Column | Description |
 |---|---|
@@ -275,25 +299,106 @@ All values are in **metres**. Each row is one date.
 | `<comp>_log_<date>` | Logarithmic relaxation term (if present) |
 | `<comp>_model` | Sum of all model components (fitted values) |
 | `<comp>_noise` | Residual = observed − model |
-| `<comp>_wtest` | Normalised w-statistic per observation |
-| `flagged` | `True` when `|w-test| > 3.29` (anomalous observation) |
+| `<comp>_wtest` | Baarda w-statistic per observation: `ê_i / (σ · sqrt(1 − h_ii))` where `h_ii` is the hat-matrix diagonal |
+| `flagged` | `True` when `|w-test| > 3.29` (anomalous observation at 0.1% level) |
+
+### 7.3 Report Fields (Accepted Model Table)
+
+The Markdown report includes an **Accepted Model** table. Here is what each field means:
+
+| Field | Explanation |
+|---|---|
+| `Sigma_0 assumed (mm)` | The a-priori noise level selected by the sigma scan. This is the smallest sigma at which the OMT accepted the model. |
+| `Sigma_hat a-posteriori (mm)` | Estimated actual noise level from the data: `sqrt(SSR / r)`. Should be close to `Sigma_0 assumed`. |
+| `Polynomial degree` | Trend degree: 0 = offset, 1 = linear velocity, 2 = acceleration, 3 = cubic. With `--poly-deg -1`, the degree whose model passes OMT at the smallest sigma is selected; ties broken by fewest parameters. |
+| `Seasonal periods (yr)` | All periodic components in the accepted model, in years. |
+| `Jump dates` | Auto-detected or user-forced step-change epochs. |
+| `Exp relaxation` | Post-jump exponential relaxation terms (onset → tau in days). |
+| `Log relaxation` | Post-jump logarithmic relaxation terms. |
+| `Exp trend (b/day)` | Exponential decay trend rate (null if not used). |
+| `n_params` | Total number of fitted model parameters. Fewer is better (parsimony). |
+| `Degrees of freedom (r)` | `n_obs − n_params`. Determines the chi-squared distribution shape for the OMT. |
+| `T_stat (SSR/σ²)` | Overall Model Test statistic: sum of squared residuals divided by σ₀². Accepted when `T_stat ≤ χ²_critical`. |
+| `χ²_critical (K)` | Chi-squared critical value at significance level α: `χ²_{1−α}(r)`. The formal threshold for model acceptance. |
+| `Unit variance factor (T/r)` | `T_stat / r = σ̂² / σ₀²`. Near 1.0 means well-calibrated; < 1 means slight overfit; > 1 means underfit. |
+| `p-value` | Tail probability `1 − χ²_CDF(T, r)`. Accepted when `p-value ≥ α`. Equivalent to `T_stat ≤ χ²_critical`. |
+| `DIA iterations` | Number of Detection–Identification–Adaptation cycles needed before acceptance. |
 
 ---
 
 ## 8. Statistical Concepts (Plain Language)
 
-### Sigma (σ) — "Expectation of Messiness"
+### Sigma (σ₀) — "Expectation of Messiness"
 
-Sigma is your assumed measurement noise. The tool scans a range and finds the smallest sigma for which the model statistically fits the data.
+Sigma (`sigma_mm` in the report) is your **assumed a-priori measurement noise** — how noisy you expect the data to be before fitting any model. The sigma scan sweeps a range (e.g., 2–20 mm) and selects the smallest sigma at which the Overall Model Test passes. The selected sigma is therefore **a-posteriori**: it was determined by observing the data, not set independently in advance.
 
-### p-value — "Does the Overall Model Fit?"
+### Overall Model Test — T_stat, chi2_critical, and p-value
 
-- **p-value ≥ 0.05** → model **accepted** (misfit is within expectations)
-- **p-value < 0.05** → model **rejected** (misfit is too large)
+The **Overall Model Test (OMT)** is the formal chi-squared test that decides whether a model fits. The test statistic is:
+
+```
+T_stat = SSR / σ₀²
+```
+
+where SSR is the sum of squared residuals. Under a correctly specified model, `T_stat ~ χ²(r)` (chi-squared with `r` degrees of freedom).
+
+**Acceptance criterion:** `T_stat ≤ χ²_critical` — equivalently, `p-value ≥ α` (default α = 0.05).
+
+- **T_stat ≤ χ²_critical** → model **accepted** (residuals are consistent with assumed noise)
+- **T_stat > χ²_critical** → model **rejected** (residuals are too large)
+
+The p-value is just the tail probability `1 − χ²_CDF(T_stat, r)`, so checking `p ≥ 0.05` is mathematically identical to checking `T_stat ≤ K`.
+
+### Unit Variance Factor and A-Posteriori Sigma
+
+Two fields in the report characterise how well the assumed sigma matches the actual data variability after fitting:
+
+**Unit variance factor** = `T_stat / r = σ̂² / σ₀²`
+- Near 1.0 → sigma assumption was well-calibrated
+- < 1.0 → model slightly over-specified, or sigma was too large
+- > 1.0 → residuals larger than expected; sigma may be underestimated
+
+**Sigma_hat a-posteriori** = `sqrt(SSR / r)` in mm — the estimated actual noise level from the data. Compare to `Sigma_0 assumed`: close agreement means good calibration.
+
+### Degrees of Freedom (r)
+
+```
+r = n_obs − n_params
+```
+
+Degrees of freedom control the chi-squared distribution shape used for the OMT. Adding model parameters (more seasonal components, jump terms, relaxation terms) reduces `r`, which raises the `χ²_critical` threshold. The tool prefers **parsimonious models** — when multiple models pass at the same sigma, the one with fewest parameters (parsimony) is preferred; further ties are broken by p-value.
 
 ### w-statistic — "Is This Specific Point an Outlier?"
 
-For each observation: `w = residual / sigma`. If `|w| > 3.29`, the point is flagged as an anomaly.
+The w-statistic implements the **formal Baarda datasnooping test** per observation epoch:
+
+```
+w_i = ê_i / (σ₀ · sqrt(1 − h_ii))
+```
+
+- `ê_i` = residual at epoch i
+- `h_ii` = hat-matrix diagonal element (leverage), computed via thin QR decomposition
+- Under H₀ (no outlier), `w_i ~ N(0, 1)`
+
+If `|w_i| > 3.29`, the observation is flagged as an **anomalous observation** (two-sided test at 0.1% significance level). The CSV `flagged` column marks these rows.
+
+> The simplified formula `w = residual / sigma` (without the `sqrt(1 − h_ii)` correction) is an approximation. The implementation uses the full Baarda formula, which correctly accounts for the leverage of each observation.
+
+### DIA Loop — Detection, Identification, Adaptation
+
+The sigma scan runs a DIA loop at each candidate sigma value:
+
+1. **Detection** — evaluate the OMT. If accepted, exit.
+2. **Identification** — test four alternative hypothesis groups using formal w-tests:
+   - Per-epoch datasnooping (single outlier)
+   - Missing periodic signals (Lomb-Scargle candidates)
+   - Velocity break / polyline (CUSUM + velocity spike candidates)
+   - Exponential trend (AIC-detected decay rate)
+   
+   The alternative with the highest `|w|` above `z_{α/2}` wins. If none passes, adaptation stops.
+3. **Adaptation** — incorporate the winning alternative into the model, then repeat from Detection.
+
+This continues until the OMT accepts or `--max-iter` is reached.
 
 ### Exponential Decay Trend — "What is it?"
 
@@ -309,7 +414,7 @@ displacement(t) = a · (exp(-b · t) − 1)
 - `b` — the decay rate in 1/days. Larger `b` means faster convergence. The time constant τ = 1/b.
 - At `t = 0`: displacement = 0 (anchored to the first observation)
 
-Because `b` is fixed before OLS fitting (amplitude `a` is solved linearly), this component integrates cleanly with the OMT statistical framework. When using `--exp-trend auto`, the tool scans 20 candidate `b` values and selects the one with the lowest AIC improvement over a plain linear model (threshold ΔAIC > 2).
+Because `b` is fixed before OLS fitting (amplitude `a` is solved linearly), this component integrates cleanly with the OMT statistical framework. When using `--exp-trend auto`, the tool scans 20 candidate `b` values and selects the one with the lowest AIC over a plain linear model. The threshold is **ΔAIC > 10** (strong evidence criterion) to avoid adding an exponential trend for weak signals.
 
 ---
 
@@ -318,12 +423,24 @@ Because `b` is fixed before OLS fitting (amplitude `a` is solved linearly), this
 ### Example 1 — Batch Processing with Resumption
 
 ```bash
-python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component all --cores 4
+python -m appsigsolv decompose gps_timeseries/TKJS_neu.csv --component all
 ```
 
-Processes all columns in parallel. If interrupted, re-running this command will skip already completed components.
+Processes all columns. If interrupted, re-running this command will skip already completed components automatically.
 
-### Example 2 — Custom Reconstruction for Comparison
+### Example 2 — Re-processing an Unsatisfactory Component
+
+After reviewing the diagnostic plot, you decide a component needs a different polynomial degree:
+
+```bash
+python -m appsigsolv decompose station.csv --component 86.159 \
+    --poly-deg 2 --force --irregular --no-relax \
+    --periods 0.5,1 --output-dir ./MLCW_decomposition
+```
+
+`--force` deletes any existing JSON/CSV/PNG/report for `86.159` and re-processes from scratch.
+
+### Example 3 — Custom Reconstruction for Comparison
 
 After `decompose` produces a model, reconstruct it on exactly the 1st and 15th of every month:
 
@@ -336,7 +453,7 @@ python -m appsigsolv reconstruct gps_timeseries/TKJS_neu.csv \
     -o results/TKJS_semi_monthly.csv
 ```
 
-### Example 3 — MLCW Column with Exponential Decay Trend
+### Example 4 — MLCW Column with Exponential Decay Trend
 
 For compaction-well data where a layer shows a monotonic exponential-decay shape (e.g., rapid early compaction tapering off over years), use `--exp-trend auto` to let the tool find the best decay rate:
 
@@ -381,12 +498,55 @@ Use `--irregular` whenever your observations are **not daily** (e.g., MLCW or mo
 
 ### How does automatic polynomial selection work?
 
-If you pass `--poly-deg -1`, the tool will test degrees 0, 1, and 2. It selects the one that results in an accepted model with the fewest parameters.
+If you pass `--poly-deg -1`, the tool will test degrees 0, 1, 2, and 3. It selects the degree whose accepted model passes OMT at the **smallest sigma** (tighter noise = better signal fit). Among degrees that pass at the same sigma, the one with fewer parameters wins; further ties are broken by p-value.
+
+### How do I re-run a component I am not happy with?
+
+Use `--force` with the specific `--component` name and any adjusted parameters. Without `--force`, the existing JSON will be detected and skipped.
 
 ### Output CSV units vs. input units
 
-Input is mm (or m if `--unit m`). **All output CSV columns are in metres.**
+Input is mm (or m if `--unit m`). **All output CSV columns are in millimetres (mm).**
+
+### Why does my batch script stop silently mid-run?
+
+On Windows, running many stations in a single Python process can exhaust GDI handles as matplotlib accumulates figure objects. Best practice for batch scripts:
+
+1. Use `cores=1` — avoids `ProcessPoolExecutor` spawn issues on Windows.
+2. Call `plt.close('all')` and `gc.collect()` between stations in the `finally` block.
+3. Import `matplotlib` and call `matplotlib.use("Agg")` at the top of the batch script before importing `appsigsolv`.
+
+### Why do MLCW column names have ugly decimal filenames?
+
+Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact. `appsigsolv` automatically normalises all numeric column names to 3 decimal places (`86.159`) during loading, so all output filenames, JSON keys, and CSV headers use the clean form.
 
 ---
 
-*Package version: 0.2.0 | appsigsolv — Applied Signal Solver*
+## 11. Changelog
+
+### v0.3.0 (2026-05)
+
+**New features:**
+- `--force` flag for `decompose`: overwrite existing results instead of skipping. Useful when manually re-processing unsatisfactory components with adjusted parameters.
+
+**Bug fixes & robustness:**
+- **Batch crash fix (Windows GDI exhaustion):** `save_plot` now calls `plt.close(fig)` + `plt.close('all')` to guarantee figure handles are released after every plot. Batch scripts should additionally call `plt.close('all')` + `gc.collect()` between stations.
+- **Numeric column name normalisation:** All floating-point CSV column name artefacts (e.g. `86.15899999999999`) are now rounded to 3 decimal places at load time in both `load_and_preprocess` and the `component="all"` path of `decompose`. Output filenames are clean (e.g. `86.159`).
+- **Per-component exception handling:** The entire fitting + extraction + output pipeline for each component is now wrapped in `try/except Exception`, so a single failing component logs its error and continues — it no longer crashes the entire batch or station run.
+- **Adaptive plot x-axis:** `YearLocator` interval is now data-driven (1 yr for spans < 4 yr, 2 yr for 4–10 yr, 5 yr for > 10 yr), preventing a matplotlib crash on short timeseries.
+
+**Algorithm:**
+- **Sigma-first cross-degree selection:** When `--poly-deg -1`, the winning degree is now chosen by the smallest accepted sigma (tightest noise), not best p-value. Ties are broken by parameter count, then p-value.
+- **`cores` default changed to `1`:** Avoids Windows `ProcessPoolExecutor` / `spawn` issues when calling `run_decompose` directly from a batch script (not under `if __name__ == '__main__'`).
+
+### v0.2.0 (prior)
+
+- Exponential decay trend component (`--exp-trend auto` / numeric b)
+- Auto polynomial degree selection (`--poly-deg -1`)
+- Sigma scan with OMT-based model acceptance
+- DIA loop with Lomb-Scargle period detection, jump detection, relaxation testing
+- `reconstruct` command with custom sampling rates
+
+---
+
+*Package version: 0.3.0 | appsigsolv — Applied Signal Solver*
