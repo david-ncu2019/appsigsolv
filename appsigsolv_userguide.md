@@ -401,6 +401,15 @@ If `|w_i| > 3.29`, the observation is flagged as an **anomalous observation** (t
 
 > The simplified formula `w = residual / sigma` (without the `sqrt(1 − h_ii)` correction) is an approximation. The implementation uses the full Baarda formula, which correctly accounts for the leverage of each observation.
 
+### Jump Detection — Pre-Loop Stage
+
+Before the DIA loop starts, `detect_jumps` scans the timeseries for abrupt level shifts using two complementary methods:
+
+1. **Rolling-diff stage** — computes day-to-day differences and flags spikes exceeding a local MAD-based threshold, then validates each spike against a 30-day median-filtered trend. Catches instantaneous co-seismic jumps or equipment resets with dense surrounding data.
+2. **Gap-level-shift stage** — scans the *raw* (non-gap-filled) series for data gaps longer than 30 days and measures the level shift across each gap (median of 30 observations before vs. 30 after). Flags the resumption date when the shift exceeds the adaptive threshold. Catches post-outage instrument resets where the rolling-diff stage would fail because the gap itself is filled by interpolation.
+
+User-supplied `--jumps` dates are merged in after both stages, with a 90-day minimum spacing enforced between all detected jump dates.
+
 ### DIA Loop — Detection, Identification, Adaptation
 
 The sigma scan runs a DIA loop at each candidate sigma value:
@@ -557,6 +566,15 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 
 ## 11. Changelog
 
+### v0.4.1 (2026-05)
+
+**Bug fixes:**
+- **Timing regression fix:** A step-function hypothesis (Heaviside H(t−t₀)) introduced in a prior commit caused an 8× slowdown and widespread timeout failures (e.g., GFES, KTES). Root cause: the iterative DIA loop found CUSUM structural breaks on every iteration for under-assumed sigma values, accumulating up to 30 spurious step dates and bloating the design matrix. The in-loop step hypothesis has been removed entirely.
+- **GFES/KTES restored:** Both stations that were incorrectly producing `_skipped_dU.txt` (timeout) now complete and produce accepted models as before.
+
+**Improvements:**
+- **Gap-level-shift detection in `detect_jumps`:** A second detection stage now scans raw (non-gap-filled) series for data gaps longer than 30 days and measures the level shift across each gap (median of 30 raw observations before vs. after). If the shift exceeds the adaptive MAD threshold, the resumption date is flagged as a jump. This catches post-outage instrument resets — such as a GPS station that went offline for 235 days and resumed at a 113 mm different level — that the original rolling-diff stage missed because the gap was filled by time-interpolation before differencing.
+
 ### v0.4.0 (2026-05)
 
 **New features:**
@@ -595,4 +613,4 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 
 ---
 
-*Package version: 0.4.0 | appsigsolv — Applied Signal Solver*
+*Package version: 0.4.1 | appsigsolv — Applied Signal Solver*
