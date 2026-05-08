@@ -6,6 +6,7 @@ import numpy as np
 from scipy.stats import median_abs_deviation
 from pathlib import Path
 
+
 def load_and_preprocess(csv_path: str, component: str, date_col: str = "", unit: str = "mm", mad_threshold: float = 4.5, irregular: bool = False) -> tuple:
     df = pd.read_csv(csv_path)
     # Normalise numeric column names to 3 d.p. so float-precision artefacts
@@ -18,7 +19,7 @@ def load_and_preprocess(csv_path: str, component: str, date_col: str = "", unit:
             pass
     if rename_map:
         df = df.rename(columns=rename_map)
-    
+
     detected_date_col = date_col
     if not detected_date_col:
         for c in ['gpsdate', 'datetime', 'date', 'Date', 'time', 'Time']:
@@ -28,7 +29,7 @@ def load_and_preprocess(csv_path: str, component: str, date_col: str = "", unit:
         if not detected_date_col:
             detected_date_col = df.columns[0]
             print(f"  [preprocess] Warning: No standard date column found. Defaulting to first column '{detected_date_col}'")
-            
+
     df["_internal_date"] = pd.to_datetime(df[detected_date_col].astype(str), errors='coerce')
     df = df.dropna(subset=["_internal_date", component])
     df = df.set_index("_internal_date").sort_index()
@@ -36,9 +37,9 @@ def load_and_preprocess(csv_path: str, component: str, date_col: str = "", unit:
     series = df[component].copy()
     series = pd.to_numeric(series, errors='coerce').dropna()
     series = series.groupby(series.index).median()
-    
+
     if unit == 'mm':
-        series = series / 1000.0  
+        series = series / 1000.0
 
     # Detrend before MAD: avoids flagging the long-term trend itself as outliers
     s_clean = series.dropna()

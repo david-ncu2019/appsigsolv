@@ -1,4 +1,6 @@
 """Command logic for 'decompose'."""
+import threading
+import time
 import pandas as pd
 from pathlib import Path
 
@@ -6,6 +8,17 @@ from appsigsolv.io.data_manager import load_and_preprocess, save_json_config, sa
 from appsigsolv.core.dia import detect_jumps, auto_detect_periods, prescreen_periods, run_omt_sigma_scan, auto_detect_exp_trend
 from appsigsolv.core.modeling import extract_components
 from appsigsolv.utils.visualization import save_plot, save_report
+
+FIT_TIMEOUT_SECONDS = 180  # per component; ~3 minutes
+
+
+def _save_skip_report(out_root: Path, stem: str, comp: str, reason: str) -> None:
+    """Write a plain-text skip report so the user knows what happened."""
+    report_path = out_root / f"{stem}_skipped_{comp}.txt"
+    with open(report_path, "w") as f:
+        f.write(f"Component : {comp}\n")
+        f.write(f"Reason    : {reason}\n")
+    print(f"  [skip-report] Written: {report_path.name}")
 
 def run_decompose(args):
     csv_path = Path(args.input_csv)
@@ -113,43 +126,76 @@ def run_decompose(args):
 
             poly_deg_min = getattr(args, "poly_deg_min", 0)
             candidate_degrees = list(range(poly_deg_min, 4)) if args.poly_deg == -1 else [args.poly_deg]
-            best_overall_model = None
-            best_overall_scan_table = []
 
-            for deg in candidate_degrees:
-                if args.poly_deg == -1:
-                    print(f"\n  [auto-deg] Testing polynomial degree: {deg}")
+            # --- Run sigma scan with a per-component timeout ---
+            fit_result = {"model": None, "scan_table": [], "error": None}
 
-                best_model_deg, scan_table_deg = run_omt_sigma_scan(
-                    series, jump_dates, final_periods, extra_polylines, extra_logs, deg,
-                    args.sigma_min, args.sigma_max, args.sigma_step,
-                    args.alpha, args.max_iter,
-                    no_relax=args.no_relax, cores=args.cores,
-                    exp_trend_b=exp_trend_b
+            def _run_fit():
+                try:
+                    best_overall_model = None
+                    best_overall_scan_table = []
+                    for deg in candidate_degrees:
+                        if args.poly_deg == -1:
+                            print(f"\n  [auto-deg] Testing polynomial degree: {deg}")
+                        best_model_deg, scan_table_deg = run_omt_sigma_scan(
+                            series, jump_dates, final_periods, extra_polylines, extra_logs, deg,
+                            args.sigma_min, args.sigma_max, args.sigma_step,
+                            args.alpha, args.max_iter,
+                            no_relax=args.no_relax, cores=args.cores,
+                            exp_trend_b=exp_trend_b
+                        )
+                        if best_model_deg is not None:
+                            if best_overall_model is None:
+                                best_overall_model = best_model_deg
+                                best_overall_scan_table = scan_table_deg
+                            else:
+                                curr_stats = best_overall_model["_omt_stats"]
+                                new_stats = best_model_deg["_omt_stats"]
+                                if (new_stats["sigma_mm"] < curr_stats["sigma_mm"]) or \
+                                   (new_stats["sigma_mm"] == curr_stats["sigma_mm"] and new_stats["n_param"] < curr_stats["n_param"]) or \
+                                   (new_stats["sigma_mm"] == curr_stats["sigma_mm"] and new_stats["n_param"] == curr_stats["n_param"] and new_stats["p_value"] > curr_stats["p_value"]):
+                                    best_overall_model = best_model_deg
+                                    best_overall_scan_table = scan_table_deg
+                    fit_result["model"] = best_overall_model
+                    fit_result["scan_table"] = best_overall_scan_table
+                except Exception as exc:
+                    fit_result["error"] = exc
+
+            t0 = time.time()
+            fit_thread = threading.Thread(target=_run_fit, daemon=True)
+            fit_thread.start()
+            fit_thread.join(timeout=FIT_TIMEOUT_SECONDS)
+            elapsed = time.time() - t0
+
+            if fit_thread.is_alive():
+                # Thread still running — timeout hit
+                reason = (
+                    f"Fitting timed out after {FIT_TIMEOUT_SECONDS}s "
+                    f"(sigma scan did not finish). "
+                    f"Likely a malfunctioned or highly irregular timeseries."
                 )
+                print(f"\n  [TIMEOUT] Component '{comp}' exceeded {FIT_TIMEOUT_SECONDS}s — skipping.")
+                _save_skip_report(out_root, stem, comp, reason)
+                continue
 
-                if best_model_deg is not None:
-                    if best_overall_model is None:
-                        best_overall_model = best_model_deg
-                        best_overall_scan_table = scan_table_deg
-                    else:
-                        curr_stats = best_overall_model["_omt_stats"]
-                        new_stats = best_model_deg["_omt_stats"]
-                        # Cross-degree selection: prefer smallest accepted sigma (tighter noise = better signal fit).
-                        # Ties broken by: fewer parameters (parsimony), then higher p-value.
-                        if (new_stats["sigma_mm"] < curr_stats["sigma_mm"]) or \
-                           (new_stats["sigma_mm"] == curr_stats["sigma_mm"] and new_stats["n_param"] < curr_stats["n_param"]) or \
-                           (new_stats["sigma_mm"] == curr_stats["sigma_mm"] and new_stats["n_param"] == curr_stats["n_param"] and new_stats["p_value"] > curr_stats["p_value"]):
-                            best_overall_model = best_model_deg
-                            best_overall_scan_table = scan_table_deg
+            if fit_result["error"] is not None:
+                raise fit_result["error"]
+
+            best_overall_model = fit_result["model"]
+            scan_table = fit_result["scan_table"]
 
             if best_overall_model is None:
-                print(f"  WARNING: No accepted model found for {comp} (tried degrees {candidate_degrees}). Skipping output.")
+                reason = (
+                    f"No accepted model found after {elapsed:.0f}s "
+                    f"(tried polynomial degrees {candidate_degrees}, "
+                    f"sigma {args.sigma_min}–{args.sigma_max} mm). "
+                    f"Likely a malfunctioned or highly irregular timeseries."
+                )
+                print(f"  [SKIP] No accepted model for '{comp}' — writing skip report.")
+                _save_skip_report(out_root, stem, comp, reason)
                 continue
 
             best_model = best_overall_model
-            scan_table = best_overall_scan_table
-
             final_deg = best_model.get("polynomial", 0)
             print(f"  [auto-deg] Selected polynomial degree: {final_deg}")
 
