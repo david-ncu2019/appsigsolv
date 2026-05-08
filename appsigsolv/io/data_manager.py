@@ -8,6 +8,16 @@ from pathlib import Path
 
 def load_and_preprocess(csv_path: str, component: str, date_col: str = "", unit: str = "mm", mad_threshold: float = 4.5, irregular: bool = False) -> tuple:
     df = pd.read_csv(csv_path)
+    # Normalise numeric column names to 3 d.p. so float-precision artefacts
+    # like '86.15899999999999' match the rounded key '86.159'.
+    rename_map = {}
+    for c in df.columns:
+        try:
+            rename_map[c] = f"{round(float(c), 3):g}"
+        except ValueError:
+            pass
+    if rename_map:
+        df = df.rename(columns=rename_map)
     
     detected_date_col = date_col
     if not detected_date_col:
@@ -115,8 +125,12 @@ def save_csv(series: pd.Series, components: dict, comp: str, out_root: Path, ste
     df = df.set_index("date")
     for col, s in components.items():
         df[col] = s.values
-        
+
     df["flagged"] = np.abs(df[f"{comp}_wtest"]) > 3.29
+    # Convert back to mm for output (internal computation is in metres)
+    skip_cols = {f"{comp}_wtest", "flagged"}
+    mm_cols = [c for c in df.columns if c not in skip_cols]
+    df[mm_cols] = df[mm_cols] * 1000.0
     csv_path = out_root / f"{stem}_decomposed_{comp}.csv"
     df.to_csv(csv_path, float_format="%.6f")
     print(f"  [output] CSV saved: {csv_path}")

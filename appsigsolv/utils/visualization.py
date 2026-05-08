@@ -93,9 +93,11 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
             ax.set_title("Residual Noise", fontweight='bold')
             ax.set_ylabel(f"Residual ({unit})")
 
+    span_years = (idx.max() - idx.min()).days / 365.25
+    year_interval = 1 if span_years < 4 else (2 if span_years < 10 else 5)
     for ax in [ax_main, ax_trend] + right_axes:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-        ax.xaxis.set_major_locator(mdates.YearLocator(2))
+        ax.xaxis.set_major_locator(mdates.YearLocator(year_interval))
         for label in ax.get_xticklabels():
             label.set_rotation(0)
             label.set_horizontalalignment('center')
@@ -110,12 +112,17 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
 
     png_path = out_root / f"{stem}_decomposed_{comp}.png"
     plt.savefig(png_path, dpi=100, bbox_inches="tight")
-    plt.close()
+    plt.close(fig)
+    plt.close('all')
     print(f"  [output] Publication-quality dynamic plot saved: {png_path}")
     return png_path
 
 def save_report(series: pd.Series, components: dict, best_model: dict, scan_table: list, comp: str, unit: str, out_root: Path, stem: str) -> Path:
-    stats = best_model.get("_omt_stats", {"sigma_mm": 1.0, "p_value": 1.0, "n_param": 1, "omt": 1.0, "K_norm": 1.0, "iterations": 1})
+    stats = best_model.get("_omt_stats", {
+        "sigma_mm": 1.0, "sigma_hat_mm": 1.0, "T_stat": 0.0,
+        "chi2_critical": 0.0, "unit_var_factor": 1.0,
+        "p_value": 1.0, "n_param": 1, "r": 1, "iterations": 1,
+    })
     model = {k: v for k, v in best_model.items() if not k.startswith("_")}
     scale = 1000.0 if unit == 'mm' else 1.0
 
@@ -127,7 +134,8 @@ def save_report(series: pd.Series, components: dict, best_model: dict, scan_tabl
         f"| Parameter | Value |",
         f"|---|---|",
         f"| Component | {comp} |",
-        f"| Sigma ({unit}) | {stats['sigma_mm']:.1f} |",
+        f"| Sigma_0 assumed ({unit}) | {stats['sigma_mm']:.1f} |",
+        f"| Sigma_hat a-posteriori ({unit}) | {stats.get('sigma_hat_mm', float('nan')):.2f} |",
         f"| Polynomial degree | {model.get('polynomial', 0)} |",
         f"| Seasonal periods (yr) | {model.get('periodic', [])} |",
         f"| Jump dates | {model.get('stepDate', [])} |",
@@ -136,8 +144,10 @@ def save_report(series: pd.Series, components: dict, best_model: dict, scan_tabl
         f"| Exp relaxation | {model.get('exp', {})} |",
         f"| Log relaxation | {model.get('log', {})} |",
         f"| n_params | {stats['n_param']} |",
-        f"| Normalized OMT | {stats['omt']:.4f} |",
-        f"| K/r threshold | {stats['K_norm']:.4f} |",
+        f"| Degrees of freedom (r) | {stats.get('r', '—')} |",
+        f"| T_stat (SSR/σ²) | {stats.get('T_stat', float('nan')):.4f} |",
+        f"| χ²_critical (K) | {stats.get('chi2_critical', float('nan')):.4f} |",
+        f"| Unit variance factor (T/r) | {stats.get('unit_var_factor', float('nan')):.4f} |",
         f"| p-value | {stats['p_value']:.6f} |",
         f"| DIA iterations | {stats['iterations']} |",
         "",
@@ -165,16 +175,17 @@ def save_report(series: pd.Series, components: dict, best_model: dict, scan_tabl
         "",
         "## Sigma Scan Summary",
         "",
-        f"| Sigma ({unit}) | Accepted | p-value | n_params | n_periods | n_polylines |",
-        "|---|---|---|---|---|---|",
+        f"| Sigma ({unit}) | Accepted | T_stat | p-value | n_params | n_periods | n_polylines |",
+        "|---|---|---|---|---|---|---|",
     ]
     for row in scan_table:
         p = f"{row['p_value']:.4f}" if row["p_value"] is not None else "—"
+        t = f"{row['T_stat']:.2f}" if row.get("T_stat") is not None else "—"
         n = str(row["n_param"]) if row["n_param"] is not None else "—"
         np_ = str(row["n_periods"]) if row["n_periods"] is not None else "—"
         nl = str(row["n_polylines"]) if row["n_polylines"] is not None else "—"
         acc = "✓" if row["accepted"] else "✗"
-        lines.append(f"| {row['sigma_mm']:.1f} | {acc} | {p} | {n} | {np_} | {nl} |")
+        lines.append(f"| {row['sigma_mm']:.1f} | {acc} | {t} | {p} | {n} | {np_} | {nl} |")
 
     flagged = components[f"{comp}_wtest"][np.abs(components[f"{comp}_wtest"]) > 3.29]
     if not flagged.empty:

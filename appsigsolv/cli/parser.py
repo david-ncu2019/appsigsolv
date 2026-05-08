@@ -21,7 +21,9 @@ def create_parser():
     p_dec.add_argument("--jumps", default="", help="Extra jump dates YYYY-MM-DD,YYYY-MM-DD")
     p_dec.add_argument("--polylines", default="", help="Extra polyline break dates YYYY-MM-DD,YYYY-MM-DD")
     p_dec.add_argument("--logs", default="", help="Extra log relaxation dates YYYY-MM-DD:tau,YYYY-MM-DD:tau")
-    p_dec.add_argument("--poly-deg", type=int, default=1, help="Polynomial degree for trend: 0=offset, 1=linear, 2=accel (default: 1)")
+    p_dec.add_argument("--poly-deg", type=int, default=1,
+                       help="Polynomial degree for trend: 0=offset, 1=linear, 2=accel, 3=cubic. "
+                            "Use -1 to auto-select the best degree from [0,1,2,3] (fewest params that passes OMT). (default: 1)")
     p_dec.add_argument("--periods", default="0.25,0.5,1.0,2.0", help="Candidate periods in years (default: 0.25,0.5,1.0,2.0)")
     p_dec.add_argument("--auto-periods", type=int, default=5, help="Auto-detect up to N additional dominant periods (default: 5)")
     p_dec.add_argument("--sigma-min", type=float, default=2.0, help="Min sigma (default 2.0)")
@@ -34,10 +36,11 @@ def create_parser():
     p_dec.add_argument("--no-relax", action="store_true", help="Skip exponential/logarithmic relaxation testing")
     p_dec.add_argument("--output-dir", default="", help="Parent dir for output folder")
     p_dec.add_argument("--cores", type=int, default=1, help="Number of CPU cores for parallel processing (default: 1)")
+    p_dec.add_argument("--force", action="store_true", help="Overwrite existing results (default: skip already-processed components)")
     p_dec.add_argument(
         "--exp-trend", dest="exp_trend", default=None, metavar="B_OR_AUTO",
         help="Exponential trend component exp(-b*t)-1. Pass 'auto' to auto-detect the best decay rate, "
-             "or a numeric b value in 1/days (e.g. 0.001 ≈ 2.7-yr time constant). Omit to disable."
+             "or a numeric b value in 1/days (e.g. 0.001 ~= 2.7-yr time constant). Omit to disable."
     )
     
     # ---------------- RECONSTRUCT ----------------
