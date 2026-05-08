@@ -118,7 +118,6 @@ def save_json_config(best_model: dict, comp: str, out_root: Path, stem: str) -> 
     json_path = out_root / f"{stem}_model_{comp}.json"
     with open(json_path, "w") as f:
         json.dump(model_config, f, indent=4)
-    print(f"  [output] JSON config saved: {json_path}")
     return json_path
 
 def save_csv(series: pd.Series, components: dict, comp: str, out_root: Path, stem: str) -> Path:
@@ -134,5 +133,4 @@ def save_csv(series: pd.Series, components: dict, comp: str, out_root: Path, ste
     df[mm_cols] = df[mm_cols] * 1000.0
     csv_path = out_root / f"{stem}_decomposed_{comp}.csv"
     df.to_csv(csv_path, float_format="%.6f")
-    print(f"  [output] CSV saved: {csv_path}")
     return csv_path

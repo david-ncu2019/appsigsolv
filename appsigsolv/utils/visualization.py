@@ -36,7 +36,7 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     ax_main = fig.add_subplot(gs_left[0:2, 0])
     ax_trend = fig.add_subplot(gs_left[2, 0], sharex=ax_main)
 
-    ax_main.plot(idx, series.values * scale, "o", ms=5, alpha=0.75, color="#95a5a6", label="Observed")
+    ax_main.plot(idx, series.values * scale, "o", linestyle=":", ms=5, lw=1.5, alpha=0.75, color="#95a5a6", label="Observed")
     ax_main.plot(idx, components[f"{comp}_model"].values * scale, "-", lw=2, color="#e74c3c", label="Model")
     stats = best_model.get("_omt_stats", {"sigma_mm": 1.0, "p_value": 1.0, "n_param": 1})
     ax_main.set_title(f"{stem}  —  {comp}", fontweight='bold')
@@ -88,7 +88,7 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
             ax.legend(loc="upper left", fontsize=12)
             
         elif ptype == "residuals":
-            ax.plot(idx, components[f"{comp}_noise"].reindex(series.index).values * scale, "o", ms=2, alpha=0.4, color="#3498db")
+            ax.plot(idx, components[f"{comp}_noise"].reindex(series.index).values * scale, "o", ms=6, alpha=0.75, color="#3498db", linestyle=":", linewidth=1.5)
             ax.axhline(0, color="black", lw=1, ls="--")
             ax.set_title("Residual Noise", fontweight='bold')
             ax.set_ylabel(f"Residual ({unit})")
@@ -114,7 +114,6 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     plt.savefig(png_path, dpi=100, bbox_inches="tight")
     plt.close(fig)
     plt.close('all')
-    print(f"  [output] Publication-quality dynamic plot saved: {png_path}")
     return png_path
 
 def save_report(series: pd.Series, components: dict, best_model: dict, scan_table: list, comp: str, unit: str, out_root: Path, stem: str) -> Path:
@@ -203,5 +202,4 @@ def save_report(series: pd.Series, components: dict, best_model: dict, scan_tabl
     lines.append("")
     report_path = out_root / f"{stem}_report_{comp}.md"
     report_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"  [output] Report saved: {report_path}")
     return report_path

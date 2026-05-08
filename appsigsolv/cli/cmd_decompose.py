@@ -83,7 +83,6 @@ def run_decompose(args):
             print(f"  [error] Column '{comp}' not found. Skipping.")
             continue
 
-        print(f"  Series loaded: {len(series)} points")
 
         if len(series) == 0:
             print(f"  [error] Component '{comp}' has no valid data after preprocessing. Skipping.")
@@ -93,8 +92,6 @@ def run_decompose(args):
             jump_dates = detect_jumps(series, extra_jumps)
 
             final_periods = list(candidate_periods)
-            if final_periods:
-                print(f"  [periods] Forcing user-provided periods: {final_periods}")
 
             if args.auto_periods > 0:
                 auto_p = auto_detect_periods(series, max_periods=args.auto_periods)
@@ -200,7 +197,6 @@ def run_decompose(args):
             print(f"  [auto-deg] Selected polynomial degree: {final_deg}")
 
             extracted = extract_components(series, best_model, comp)
-            print(f"  [extract] Components: {list(extracted.keys())}")
 
             save_json_config(best_model, comp, out_root, stem)
             save_csv(series, extracted, comp, out_root, stem)
