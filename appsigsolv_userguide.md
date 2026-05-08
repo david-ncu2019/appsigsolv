@@ -170,7 +170,8 @@ python -m appsigsolv decompose <input_csv> [OPTIONS]
 | `--jumps` | | Extra jump dates to force: `YYYY-MM-DD,YYYY-MM-DD,...` |
 | `--polylines` | | Extra polyline break dates: `YYYY-MM-DD,YYYY-MM-DD,...` |
 | `--logs` | | Log relaxation terms: `YYYY-MM-DD:tau_days,...` |
-| `--poly-deg` | `1` | Polynomial degree: `0`=offset only, `1`=linear trend, `2`=acceleration, `3`=cubic. Use `-1` to auto-select the degree with the tightest passing sigma (0–3). |
+| `--poly-deg` | `1` | Polynomial degree: `0`=offset only, `1`=linear trend, `2`=acceleration, `3`=cubic. Use `-1` to auto-select the degree with the tightest passing sigma (from `--poly-deg-min` up to 3). |
+| `--poly-deg-min` | `0` | Minimum polynomial degree considered when `--poly-deg -1`. Set to `1` to exclude offset-only models, `2` to require at least acceleration. Has no effect when `--poly-deg` is a fixed value. |
 | `--periods` | `0.25,0.5,1.0,2.0` | Candidate periods (years) always included in the model search |
 | `--auto-periods` | `5` | Auto-detect up to N additional dominant periods via Lomb-Scargle |
 | `--sigma-min` | `2.0` | Start of sigma scan in mm |
@@ -214,6 +215,22 @@ Results are saved in `<output_dir>/<csv_stem>/` (e.g., `gps_timeseries/TKJS_neu/
 | `<stem>_decomposed_<comp>.csv` | All decomposed signal components (displacement in mm) |
 | `<stem>_decomposed_<comp>.png` | Diagnostic figure |
 | `<stem>_report_<comp>.md` | Statistical summary report |
+| `<stem>_skipped_<comp>.txt` | Written when a component is auto-skipped (see below) |
+
+### Auto-Skip Behaviour
+
+When a component cannot be fit, `decompose` writes a `_skipped_<comp>.txt` file and moves on to the next component. This happens in two cases:
+
+- **No accepted model** — the sigma scan exhausted all candidate sigma values and polynomial degrees without the OMT accepting any model. This typically indicates a malfunctioned sensor, a highly irregular signal, or a data span too short for the selected periods. The skip report records the degrees tried and the sigma range.
+- **Timeout** — fitting exceeded **180 seconds** per component. The fitting thread is abandoned and a skip report is written with the reason `"timed out"`. This protects batch runs against pathologically slow timeseries on Windows (where `signal.SIGALRM` is unavailable).
+
+In both cases the batch continues without interruption. Inspect the skip report and the diagnostic plot of the raw series to decide whether to adjust parameters or exclude the station entirely.
+
+```
+# Example skip report content:
+Component : dU
+Reason    : No accepted model found after 57s (tried polynomial degrees [1, 2, 3], sigma 2.0–20.0 mm). Likely a malfunctioned or highly irregular timeseries.
+```
 
 ---
 
@@ -498,7 +515,19 @@ Use `--irregular` whenever your observations are **not daily** (e.g., MLCW or mo
 
 ### How does automatic polynomial selection work?
 
-If you pass `--poly-deg -1`, the tool will test degrees 0, 1, 2, and 3. It selects the degree whose accepted model passes OMT at the **smallest sigma** (tighter noise = better signal fit). Among degrees that pass at the same sigma, the one with fewer parameters wins; further ties are broken by p-value.
+If you pass `--poly-deg -1`, the tool tests degrees from `--poly-deg-min` (default `0`) up to `3`. It selects the degree whose accepted model passes OMT at the **smallest sigma** (tighter noise = better signal fit). Among degrees that pass at the same sigma, the one with fewer parameters wins; further ties are broken by p-value.
+
+### How do I prevent offset-only (degree 0) models?
+
+Use `--poly-deg-min 1` together with `--poly-deg -1`. This restricts the auto-selection to degrees 1–3, guaranteeing at least a linear trend in the accepted model. In batch scripts, add `poly_deg_min=1` to the `Namespace`:
+
+```python
+args = Namespace(
+    poly_deg=-1,
+    poly_deg_min=1,   # exclude degree-0 offset-only models
+    ...
+)
+```
 
 ### How do I re-run a component I am not happy with?
 
@@ -507,6 +536,10 @@ Use `--force` with the specific `--component` name and any adjusted parameters. 
 ### Output CSV units vs. input units
 
 Input is mm (or m if `--unit m`). **All output CSV columns are in millimetres (mm).**
+
+### How do I know if a station was skipped?
+
+After a batch run, check the output directory for `*_skipped_*.txt` files — one per skipped component. Each file records the component name, the reason (no model or timeout), elapsed time, and the sigma/degree range that was tried. The raw data plot is still written so you can visually inspect whether the signal is physically meaningful or the sensor malfunctioned.
 
 ### Why does my batch script stop silently mid-run?
 
@@ -524,6 +557,18 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 
 ## 11. Changelog
 
+### v0.4.0 (2026-05)
+
+**New features:**
+- **Auto-skip with skip report:** When the sigma scan finds no accepted model, or when fitting exceeds 180 s, `decompose` writes a `_skipped_<comp>.txt` report and continues to the next component. Previously the batch would hang or silently print a WARNING with no output file. The skip report records the component name, reason, elapsed time, and parameters tried.
+- **3-minute per-component timeout:** Fitting runs in a daemon thread; the main thread waits up to 180 s. If it exceeds this, the thread is abandoned, a skip report is written, and the batch continues. This prevents malfunctioned or highly irregular timeseries from blocking an entire batch on Windows (where `signal.SIGALRM` is unavailable).
+
+**Performance:**
+- **18× Lomb-Scargle speedup in DIA loop:** The `days[]` and `freqs[]` arrays in `_identify_best_alternative` are now pre-computed once before the DIA iteration loop (they are loop-invariant) and passed in, instead of being recomputed every iteration. The frequency grid was also reduced from 5 000 to 500 points — sufficient to resolve all peaks between 0.2–20 yr, cutting per-call time ~10×. Combined effect: a 15-year GPS series (5 476 pts, CHIN station) drops from ~18 minutes to ~60 seconds.
+
+**Output / UX:**
+- **Reduced verbose output:** Removed per-component log lines that cluttered batch output: `[periods] Forcing...`, `Series loaded: N points`, `[extract] Components: [...]`, and all four `[output] ... saved` lines. What remains: preprocessing stats, sigma-scan result, auto-deg selection, skip/timeout notices, and errors.
+
 ### v0.3.0 (2026-05)
 
 **New features:**
@@ -536,6 +581,7 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 - **Adaptive plot x-axis:** `YearLocator` interval is now data-driven (1 yr for spans < 4 yr, 2 yr for 4–10 yr, 5 yr for > 10 yr), preventing a matplotlib crash on short timeseries.
 
 **Algorithm:**
+- **`--poly-deg-min`:** New option to set the minimum polynomial degree when using `--poly-deg -1`. Default `0` (old behaviour). Set to `1` to exclude offset-only models — useful when data clearly has a trend and degree-0 results are not physically meaningful.
 - **Sigma-first cross-degree selection:** When `--poly-deg -1`, the winning degree is now chosen by the smallest accepted sigma (tightest noise), not best p-value. Ties are broken by parameter count, then p-value.
 - **`cores` default changed to `1`:** Avoids Windows `ProcessPoolExecutor` / `spawn` issues when calling `run_decompose` directly from a batch script (not under `if __name__ == '__main__'`).
 
@@ -549,4 +595,4 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 
 ---
 
-*Package version: 0.3.0 | appsigsolv — Applied Signal Solver*
+*Package version: 0.4.0 | appsigsolv — Applied Signal Solver*
