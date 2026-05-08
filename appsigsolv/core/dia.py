@@ -56,6 +56,7 @@ def detect_jumps(
     smooth_window: int = 30,
     adaptive_percentile: float = 99,
     min_days_apart: int = 90,
+    gap_min_days: int = 30,
 ) -> list:
     from scipy.ndimage import median_filter
 
@@ -91,6 +92,24 @@ def detect_jumps(
                 validated.append(date)
         except Exception:
             continue
+
+    # --- Gap-level-shift detection ------------------------------------------
+    # Checks level shift across data gaps > gap_min_days in the *raw* series.
+    # This catches post-gap instrument resets (e.g. LNJS 2022→2023) that the
+    # rolling-diff stage misses because the gap is filled by interpolation.
+    raw_obs = series.dropna()
+    if len(raw_obs) >= 4:
+        raw_idx = raw_obs.index
+        raw_gaps = np.diff([d.toordinal() for d in raw_idx])
+        for gi in np.where(raw_gaps > gap_min_days)[0]:
+            after_date = raw_idx[gi + 1]
+            before_vals = raw_obs.iloc[max(0, gi - 29): gi + 1].values
+            after_vals  = raw_obs.iloc[gi + 1: gi + 31].values
+            if len(before_vals) == 0 or len(after_vals) == 0:
+                continue
+            shift_mm = abs(float(np.median(after_vals) - np.median(before_vals))) * 1000.0
+            if shift_mm >= adaptive_thr:
+                validated.append(after_date)
 
     validated.sort()
     filtered = []
@@ -342,8 +361,6 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
     2. Missing period — cosine/sine columns for each Lomb-Scargle peak
     3. Velocity break — piecewise-linear column at the estimated break date
     4. Exp trend      — exponential-trend column (if not already in model)
-    5. Step function  — Heaviside H(t-t0) column at CUSUM structural-break date
-                        (distinct from polyline: tests level shift, not slope change)
 
     Selection rule (Teunissen): adapt on candidate i* = argmax_i |w_i|,
     provided |w_{i*}| > z_{α/2}  (two-tailed normal critical value).
@@ -356,7 +373,7 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
     Returns
     -------
     (adapt_type, adapt_val, max_w_abs)
-        adapt_type : "period" | "polyline" | "step" | "exp_trend" | "outlier" | "None"
+        adapt_type : "period" | "polyline" | "exp_trend" | "outlier" | "None"
         adapt_val  : the value to add to the model (period_yr, date_str, b_val, or epoch_idx)
         max_w_abs  : absolute w-statistic of winning hypothesis
     """
@@ -459,24 +476,6 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
                 best_w = w_exp
                 best_type = "exp_trend"
                 best_val = best_b
-
-    # --- Hypothesis group 5: step function (sustained level shift) ----------
-    # Distinct from the polyline hypothesis: tests H(t-t0) rather than max(t-t0,0).
-    # Catches jumps that persist as a constant offset rather than a slope change.
-    if n >= 20:
-        cusum_step = _cusum_break_date(residuals, dates)
-        if cusum_step is not None and cusum_step not in model.get("stepDate", []):
-            try:
-                step_dt = datetime.strptime(cusum_step, "%Y%m%d")
-                t_step = (step_dt - dates[0]).days
-                c_step = (days > t_step).astype(float)  # strict > matches get_design_matrix4step_func
-                w_step = abs(_w_test_for_candidate(residuals, G, sigma_m, c_step))
-                if w_step > best_w:
-                    best_w = w_step
-                    best_type = "step"
-                    best_val = cusum_step
-            except (ValueError, TypeError):
-                pass
 
     # Significance gate: winning hypothesis must exceed z_{α/2}
     if best_w < z_crit:
@@ -667,12 +666,6 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines,
             outlier_date = date_list[adapt_val].strftime("%Y%m%d")
             if outlier_date not in model["stepDate"]:
                 model["stepDate"].append(outlier_date)
-            else:
-                break
-
-        if adapt_type == "step":
-            if adapt_val not in model["stepDate"]:
-                model["stepDate"].append(adapt_val)
             else:
                 break
 
