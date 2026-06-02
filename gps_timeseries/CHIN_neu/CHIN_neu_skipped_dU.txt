@@ -1,0 +1,2 @@
+Component : dU
+Reason    : No accepted model found after 57s (tried polynomial degrees [1, 2, 3], sigma 2.0–20.0 mm). Likely a malfunctioned or highly irregular timeseries.

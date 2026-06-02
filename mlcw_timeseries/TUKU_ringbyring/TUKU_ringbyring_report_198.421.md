@@ -1,0 +1,51 @@
+# Timeseries Decomposition Report: TUKU_ringbyring — 198.421
+
+## Accepted Model
+
+| Parameter | Value |
+|---|---|
+| Component | 198.421 |
+| Sigma_0 assumed (mm) | 2.0 |
+| Sigma_hat a-posteriori (mm) | 1.86 |
+| Polynomial degree | 1 |
+| Seasonal periods (yr) | [0.5, 1.0] |
+| Jump dates | [] |
+| Polyline breaks | [] |
+| Exp trend (b/day) | None |
+| Exp relaxation | {} |
+| Log relaxation | {} |
+| n_params | 6 |
+| Degrees of freedom (r) | 256 |
+| T_stat (SSR/σ²) | 221.7160 |
+| χ²_critical (K) | 294.3207 |
+| Unit variance factor (T/r) | 0.8661 |
+| p-value | 0.940479 |
+| DIA iterations | 0 |
+
+## Variance Explained per Component (%)
+
+| Component | Std (mm) | Variance Explained (%) |
+|---|---|---|
+| 198.421_trend | 4.27 | 83.86 |
+| 198.421_0.5yr | 0.41 | 0.78 |
+| 198.421_1yr | 0.10 | 0.05 |
+| 198.421_noise | 1.84 | 15.59 |
+
+## Sigma Scan Summary
+
+| Sigma (mm) | Accepted | T_stat | p-value | n_params | n_periods | n_polylines |
+|---|---|---|---|---|---|---|
+| 2.0 | ✓ | 221.72 | 0.9405 | 6 | 2 | 0 |
+| 3.0 | ✓ | 98.54 | 1.0000 | 6 | 2 | 0 |
+| 4.0 | ✓ | 55.43 | 1.0000 | 6 | 2 | 0 |
+| 5.0 | ✓ | 35.47 | 1.0000 | 6 | 2 | 0 |
+| 6.0 | ✓ | 24.64 | 1.0000 | 6 | 2 | 0 |
+| 7.0 | ✓ | 18.10 | 1.0000 | 6 | 2 | 0 |
+| 8.0 | ✓ | 13.86 | 1.0000 | 6 | 2 | 0 |
+| 9.0 | ✓ | 10.95 | 1.0000 | 6 | 2 | 0 |
+| 10.0 | ✓ | 8.87 | 1.0000 | 6 | 2 | 0 |
+| 11.0 | ✓ | 7.33 | 1.0000 | 6 | 2 | 0 |
+| 12.0 | ✓ | 6.16 | 1.0000 | 6 | 2 | 0 |
+| 13.0 | ✓ | 5.25 | 1.0000 | 6 | 2 | 0 |
+| 14.0 | ✓ | 4.52 | 1.0000 | 6 | 2 | 0 |
+| 15.0 | ✓ | 3.94 | 1.0000 | 6 | 2 | 0 |

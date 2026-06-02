@@ -1,0 +1,20 @@
+{
+    "polynomial": 0,
+    "periodic": [
+        0.5,
+        1.0,
+        6.99,
+        12.39
+    ],
+    "stepDate": [
+        "20140617"
+    ],
+    "polyline": [],
+    "exp": {
+        "20140617": [
+            90
+        ]
+    },
+    "log": {},
+    "exp_trend": null
+}
