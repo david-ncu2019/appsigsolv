@@ -19,3 +19,12 @@ results/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Binary archives
+*.rar
+
+# Runtime logs
+*.log
+
+# Claude Code config
+.claude/
