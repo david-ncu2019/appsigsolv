@@ -8,7 +8,7 @@ This guide covers installation, both CLI commands, input/output formats, interpr
 
 ## Table of Contents
 
-1. [What appsigsolv Does](#1-what-appsigsolv-does)
+1. [What appsigsolv Does](#1-what-appsigolv-does)
 2. [Installation & Requirements](#2-installation--requirements)
 3. [Quick Start](#3-quick-start)
 4. [Input Data Formats](#4-input-data-formats)
@@ -151,7 +151,7 @@ datetime,8.775,11.938,25.605,39.545,...
 
 ## 5. Command: `decompose`
 
-The `decompose` command runs the full automated pipeline: load data → detect jumps → scan sigma → DIA loop → save results.
+The `decompose` command runs the full automated pipeline: load data -> detect jumps -> scan sigma -> DIA loop -> save results.
 
 ### Syntax
 
@@ -177,15 +177,21 @@ python -m appsigsolv decompose <input_csv> [OPTIONS]
 | `--sigma-min` | `2.0` | Start of sigma scan in mm |
 | `--sigma-max` | `15.0` | End of sigma scan in mm |
 | `--sigma-step` | `0.5` | Sigma step size in mm |
-| `--alpha` | `0.05` | OMT significance level (model accepted when p-value ≥ alpha) |
+| `--alpha` | `0.05` | OMT significance level (model accepted when p-value >= alpha) |
 | `--max-iter` | `5` | Max DIA iterations per sigma value |
 | `--irregular` | *(flag)* | Skip daily resampling — required for MLCW or non-daily data |
 | `--no-plot` | *(flag)* | Skip PNG figure generation |
 | `--no-relax` | *(flag)* | Skip exponential/log relaxation testing after model acceptance |
-| `--force` | *(flag)* | **Overwrite existing results.** By default, components with an existing `_model_<comp>.json` are skipped. Use `--force` to re-process them (e.g. when you want to try different parameters on a component). |
+| `--no-jump` | *(flag)* | Disable automatic jump detection. Manually specified `--jumps` dates are still applied. Suppresses hypothesis group 1 (datasnooping/outlier) in the DIA loop. |
+| `--no-seasonal` | *(flag)* | Disable all periodic/seasonal component detection. Overrides `--periods` and `--auto-periods`. Suppresses hypothesis group 2 (missing periodic) in the DIA loop. |
+| `--no-exp-trend` | *(flag)* | Disable exponential trend auto-detection. Suppresses hypothesis group 4 (exponential trend) in the DIA loop. Unlike omitting `--exp-trend` (which allows automatic detection), this actively prevents detection. |
+| `--auto-sigma` | *(flag)* | Select the sigma value that **maximises polyline breakpoints** rather than minimising parameter count. Designed for pure piecewise-linear fitting where the goal is the finest velocity segmentation that still passes the OMT. |
+| `--start-date` | *(none)* | Filter data to start at this date (inclusive). Format: `YYYY-MM-DD`. Applied after preprocessing, before jump detection. |
+| `--end-date` | *(none)* | Filter data to end at this date (inclusive). Format: `YYYY-MM-DD`. |
+| `--exp-trend` | *(off)* | Exponential decay trend `exp(-b.t)-1`. Pass `auto` to auto-detect the best decay rate via AIC, or a numeric `b` in 1/days (e.g. `0.001` ~= 2.7-yr time constant). Omit to allow the DIA loop to detect it as hypothesis group 4. |
 | `--output-dir` | *(same folder as CSV)* | Parent directory for outputs |
 | `--cores` | `1` | Number of CPU cores for parallel sigma scan |
-| `--exp-trend` | *(off)* | Exponential decay trend `exp(-b·t)−1`. Pass `auto` to auto-detect the best decay rate via AIC, or a numeric `b` in 1/days (e.g. `0.001` ≈ 2.7-yr time constant). Omit to disable. |
+| `--force` | *(flag)* | **Overwrite existing results.** By default, components with an existing `_model_<comp>.json` are skipped. Use `--force` to re-process them. |
 
 ### Resumption and Overwrite Behaviour
 
@@ -217,6 +223,8 @@ Results are saved in `<output_dir>/<csv_stem>/` (e.g., `gps_timeseries/TKJS_neu/
 | `<stem>_report_<comp>.md` | Statistical summary report |
 | `<stem>_skipped_<comp>.txt` | Written when a component is auto-skipped (see below) |
 
+**JSON note:** The saved model JSON strips internal control fields. Specifically, `no_seasonal`, `no_jump`, and `allowed_periods` are **not written** to the JSON file — they are runtime-only flags that do not belong in the persisted model configuration.
+
 ### Auto-Skip Behaviour
 
 When a component cannot be fit, `decompose` writes a `_skipped_<comp>.txt` file and moves on to the next component. This happens in two cases:
@@ -236,7 +244,7 @@ Reason    : No accepted model found after 57s (tried polynomial degrees [1, 2, 3
 
 ## 6. Command: `reconstruct`
 
-The `reconstruct` command fits a **user-specified** model (either from a JSON file or CLI flags) to a timeseries and saves the fitted curve. 
+The `reconstruct` command fits a **user-specified** model (either from a JSON file or CLI flags) to a timeseries and saves the fitted curve.
 
 ### Syntax
 
@@ -298,7 +306,7 @@ The output filename will automatically include a suffix like `_daily`, `_custom`
 
 If an exponential decay trend was detected, `exp_trend` will hold the fitted `b` value (in 1/days) instead of `null`, for example `"exp_trend": 0.000616`. This value is automatically used by `reconstruct --json`.
 
-This file is directly usable as `--json` input to `reconstruct`.
+**Fields not persisted in JSON:** Three runtime-only fields are used inside the DIA loop but stripped before saving: `no_seasonal`, `no_jump`, and `allowed_periods`. These control how the DIA searches for candidate components and have no meaning outside the fitting process. The saved JSON contains only the accepted model structure, which is directly usable as `--json` input to `reconstruct`.
 
 ### 7.2 Decomposed CSV
 
@@ -308,15 +316,15 @@ All displacement values are in **millimetres** (mm). The `_wtest` and `flagged` 
 |---|---|
 | `date` | ISO date |
 | `<comp>` | Observed displacement |
-| `<comp>_trend` | Polynomial trend component |
-| `<comp>_exp_trend` | Exponential decay trend `a·(exp(-b·t)−1)` (only present when detected or specified) |
+| `<comp>_trend` | Polynomial trend component (includes polyline breaks) |
+| `<comp>_exp_trend` | Exponential decay trend `a.(exp(-b.t)-1)` (only present when detected or specified) |
 | `<comp>_<T>yr` | Seasonal component at period T years |
 | `<comp>_jump` | Cumulative step function (if jumps present) |
 | `<comp>_exp_<date>` | Exponential relaxation term (if present) |
 | `<comp>_log_<date>` | Logarithmic relaxation term (if present) |
 | `<comp>_model` | Sum of all model components (fitted values) |
 | `<comp>_noise` | Residual = observed − model |
-| `<comp>_wtest` | Baarda w-statistic per observation: `ê_i / (σ · sqrt(1 − h_ii))` where `h_ii` is the hat-matrix diagonal |
+| `<comp>_wtest` | Baarda w-statistic per observation: `e_i / (sigma . sqrt(1 - h_ii))` where `h_ii` is the hat-matrix diagonal |
 | `flagged` | `True` when `|w-test| > 3.29` (anomalous observation at 0.1% level) |
 
 ### 7.3 Report Fields (Accepted Model Table)
@@ -330,76 +338,82 @@ The Markdown report includes an **Accepted Model** table. Here is what each fiel
 | `Polynomial degree` | Trend degree: 0 = offset, 1 = linear velocity, 2 = acceleration, 3 = cubic. With `--poly-deg -1`, the degree whose model passes OMT at the smallest sigma is selected; ties broken by fewest parameters. |
 | `Seasonal periods (yr)` | All periodic components in the accepted model, in years. |
 | `Jump dates` | Auto-detected or user-forced step-change epochs. |
-| `Exp relaxation` | Post-jump exponential relaxation terms (onset → tau in days). |
+| `Polyline breaks` | Velocity-break dates identified automatically by the DIA or user-specified. |
+| `Exp relaxation` | Post-jump exponential relaxation terms (onset -> tau in days). |
 | `Log relaxation` | Post-jump logarithmic relaxation terms. |
 | `Exp trend (b/day)` | Exponential decay trend rate (null if not used). |
 | `n_params` | Total number of fitted model parameters. Fewer is better (parsimony). |
-| `Degrees of freedom (r)` | `n_obs − n_params`. Determines the chi-squared distribution shape for the OMT. |
-| `T_stat (SSR/σ²)` | Overall Model Test statistic: sum of squared residuals divided by σ₀². Accepted when `T_stat ≤ χ²_critical`. |
-| `χ²_critical (K)` | Chi-squared critical value at significance level α: `χ²_{1−α}(r)`. The formal threshold for model acceptance. |
-| `Unit variance factor (T/r)` | `T_stat / r = σ̂² / σ₀²`. Near 1.0 means well-calibrated; < 1 means slight overfit; > 1 means underfit. |
-| `p-value` | Tail probability `1 − χ²_CDF(T, r)`. Accepted when `p-value ≥ α`. Equivalent to `T_stat ≤ χ²_critical`. |
+| `Degrees of freedom (r)` | `n_obs - n_params`. Determines the chi-squared distribution shape for the OMT. |
+| `T_stat (SSR/sigma²)` | Overall Model Test statistic: sum of squared residuals divided by sigma_0². Accepted when `T_stat <= chi²_critical`. |
+| `chi²_critical (K)` | Chi-squared critical value at significance level alpha: `chi²_{1-alpha}(r)`. The formal threshold for model acceptance. |
+| `Unit variance factor (T/r)` | `T_stat / r = sigma_hat² / sigma_0²`. Near 1.0 means well-calibrated; < 1 means slight overfit; > 1 means underfit. |
+| `p-value` | Tail probability `1 - chi²_CDF(T, r)`. Accepted when `p-value >= alpha`. Equivalent to `T_stat <= chi²_critical`. |
 | `DIA iterations` | Number of Detection–Identification–Adaptation cycles needed before acceptance. |
 
 ---
 
 ## 8. Statistical Concepts (Plain Language)
 
-### Sigma (σ₀) — "Expectation of Messiness"
+### Sigma (sigma_0) — "Expectation of Messiness"
 
 Sigma (`sigma_mm` in the report) is your **assumed a-priori measurement noise** — how noisy you expect the data to be before fitting any model. The sigma scan sweeps a range (e.g., 2–20 mm) and selects the smallest sigma at which the Overall Model Test passes. The selected sigma is therefore **a-posteriori**: it was determined by observing the data, not set independently in advance.
+
+**Two selection strategies:**
+
+- **Default (parsimony):** Among all sigma values that produced an accepted model, the one with the fewest parameters wins. This gives the simplest model that still describes the data. Ties are broken by sigma (tighter noise preferred), then by p-value.
+- **`--auto-sigma` (finest segmentation):** Selects the sigma that produces the most polyline breakpoints. This is useful when you know the signal contains many velocity changes (e.g., a slow-slip event sequence) and you want the model to resolve the finest segmentation that still passes the OMT. Use this together with `--poly-deg 1` (linear trend) for a pure piecewise-linear fit.
 
 ### Overall Model Test — T_stat, chi2_critical, and p-value
 
 The **Overall Model Test (OMT)** is the formal chi-squared test that decides whether a model fits. The test statistic is:
 
 ```
-T_stat = SSR / σ₀²
+T_stat = SSR / sigma_0²
 ```
 
-where SSR is the sum of squared residuals. Under a correctly specified model, `T_stat ~ χ²(r)` (chi-squared with `r` degrees of freedom).
+where SSR is the sum of squared residuals. Under a correctly specified model, `T_stat ~ chi²(r)` (chi-squared with `r` degrees of freedom).
 
-**Acceptance criterion:** `T_stat ≤ χ²_critical` — equivalently, `p-value ≥ α` (default α = 0.05).
+**Acceptance criterion:** `T_stat <= chi²_critical` — equivalently, `p-value >= alpha` (default alpha = 0.05).
 
-- **T_stat ≤ χ²_critical** → model **accepted** (residuals are consistent with assumed noise)
-- **T_stat > χ²_critical** → model **rejected** (residuals are too large)
+- **T_stat <= chi²_critical** -> model **accepted** (residuals are consistent with assumed noise)
+- **T_stat > chi²_critical** -> model **rejected** (residuals are too large)
 
-The p-value is just the tail probability `1 − χ²_CDF(T_stat, r)`, so checking `p ≥ 0.05` is mathematically identical to checking `T_stat ≤ K`.
+The p-value is just the tail probability `1 - chi²_CDF(T_stat, r)`, so checking `p >= 0.05` is mathematically identical to checking `T_stat <= K`.
 
 ### Unit Variance Factor and A-Posteriori Sigma
 
 Two fields in the report characterise how well the assumed sigma matches the actual data variability after fitting:
 
-**Unit variance factor** = `T_stat / r = σ̂² / σ₀²`
-- Near 1.0 → sigma assumption was well-calibrated
-- < 1.0 → model slightly over-specified, or sigma was too large
-- > 1.0 → residuals larger than expected; sigma may be underestimated
+**Unit variance factor** = `T_stat / r = sigma_hat² / sigma_0²`
+- Near 1.0 -> sigma assumption was well-calibrated
+- < 1.0 -> model slightly over-specified, or sigma was too large
+- > 1.0 -> residuals larger than expected; sigma may be underestimated
 
 **Sigma_hat a-posteriori** = `sqrt(SSR / r)` in mm — the estimated actual noise level from the data. Compare to `Sigma_0 assumed`: close agreement means good calibration.
 
 ### Degrees of Freedom (r)
 
 ```
-r = n_obs − n_params
+r = n_obs - n_params
 ```
 
-Degrees of freedom control the chi-squared distribution shape used for the OMT. Adding model parameters (more seasonal components, jump terms, relaxation terms) reduces `r`, which raises the `χ²_critical` threshold. The tool prefers **parsimonious models** — when multiple models pass at the same sigma, the one with fewest parameters (parsimony) is preferred; further ties are broken by p-value.
+Degrees of freedom control the chi-squared distribution shape used for the OMT. Adding model parameters (more seasonal components, jump terms, relaxation terms) reduces `r`, which raises the `chi²_critical` threshold. The tool prefers **parsimonious models** — when multiple models pass at the same sigma, the one with fewest parameters (parsimony) is preferred; further ties are broken by p-value.
 
 ### w-statistic — "Is This Specific Point an Outlier?"
 
 The w-statistic implements the **formal Baarda datasnooping test** per observation epoch:
 
 ```
-w_i = ê_i / (σ₀ · sqrt(1 − h_ii))
+w_i = e_i / (sigma_0 . sqrt(1 - h_ii))
 ```
 
-- `ê_i` = residual at epoch i
+- `e_i` = residual at epoch i
 - `h_ii` = hat-matrix diagonal element (leverage), computed via thin QR decomposition
-- Under H₀ (no outlier), `w_i ~ N(0, 1)`
+- Under H_0 (no outlier), `w_i ~ N(0, 1)`
 
 If `|w_i| > 3.29`, the observation is flagged as an **anomalous observation** (two-sided test at 0.1% significance level). The CSV `flagged` column marks these rows.
 
-> The simplified formula `w = residual / sigma` (without the `sqrt(1 − h_ii)` correction) is an approximation. The implementation uses the full Baarda formula, which correctly accounts for the leverage of each observation.
+> The simplified formula `w = residual / sigma` (without the `sqrt(1 - h_ii)` correction) is an approximation. The implementation uses the full Baarda formula, which correctly accounts for the leverage of each observation.
 
 ### Jump Detection — Pre-Loop Stage
 
@@ -408,23 +422,51 @@ Before the DIA loop starts, `detect_jumps` scans the timeseries for abrupt level
 1. **Rolling-diff stage** — computes day-to-day differences and flags spikes exceeding a local MAD-based threshold, then validates each spike against a 30-day median-filtered trend. Catches instantaneous co-seismic jumps or equipment resets with dense surrounding data.
 2. **Gap-level-shift stage** — scans the *raw* (non-gap-filled) series for data gaps longer than 30 days and measures the level shift across each gap (median of 30 observations before vs. 30 after). Flags the resumption date when the shift exceeds the adaptive threshold. Catches post-outage instrument resets where the rolling-diff stage would fail because the gap itself is filled by interpolation.
 
-User-supplied `--jumps` dates are merged in after both stages, with a 90-day minimum spacing enforced between all detected jump dates.
+User-supplied `--jumps` dates are merged in after both stages. The `--no-jump` flag disables *both* automatic stages while still respecting manually specified `--jumps` dates.
+
+A 90-day minimum spacing is enforced between all detected jump dates.
 
 ### DIA Loop — Detection, Identification, Adaptation
 
-The sigma scan runs a DIA loop at each candidate sigma value:
+The sigma scan runs a DIA loop at each candidate sigma value. The loop tests four distinct hypothesis groups, each controlled by its own flag:
 
-1. **Detection** — evaluate the OMT. If accepted, exit.
-2. **Identification** — test four alternative hypothesis groups using formal w-tests:
-   - Per-epoch datasnooping (single outlier)
-   - Missing periodic signals (Lomb-Scargle candidates)
-   - Velocity break / polyline (CUSUM + velocity spike candidates)
-   - Exponential trend (AIC-detected decay rate)
-   
-   The alternative with the highest `|w|` above `z_{α/2}` wins. If none passes, adaptation stops.
-3. **Adaptation** — incorporate the winning alternative into the model, then repeat from Detection.
+**1. Hypothesis group 1: Datasnooping (single-epoch outlier)**
 
-This continues until the OMT accepts or `--max-iter` is reached.
+The w-statistic is computed for every observation epoch. The epoch with the highest `|w|` above the critical value `z_{alpha/2}` is flagged as an outlier and converted into a jump (unit step) at that date, effectively removing it from the estimation.
+
+- **Controlled by:** `--no-jump` (disables this group entirely)
+- **Physical motivation:** A spiked measurement from a sensor glitch, lightning strike, or transient disturbance that should not propagate into the trend or seasonal estimates.
+
+**2. Hypothesis group 2: Missing periodic signal (Lomb-Scargle)**
+
+The residuals are searched for dominant spectral peaks using the Lomb-Scargle periodogram. The top 5 peaks are tested as candidate sine/cosine pairs using the formal w-test. Only periods within 0.05 years of the allowed set (the merged list of `--periods` and auto-detected `--auto-periods` candidates) are accepted. This prevents the DIA from adding periods that were not in the original candidate library.
+
+- **Controlled by:** `--no-seasonal` (disables this group entirely). The allowed set is further restricted by `--periods` and `--auto-periods` (which define what periods exist in `allowed_periods`).
+- **Physical motivation:** An unmodeled annual or semi-annual groundwater cycle, a thermal expansion signal, or a multi-year drought/recharge pattern.
+
+**3. Hypothesis group 3: Velocity break / polyline (piecewise-linear)**
+
+Two sub-strategies identify candidate break dates:
+
+- **Velocity spike:** The first difference of the residuals is examined. The epoch with the largest positive or negative velocity spike (relative to the MAD-scaled median velocity) is tested as a polyline break.
+- **CUSUM break:** The Ploberger-Kramer (1992) normalised CUSUM range test identifies structural breaks in the residual mean. If the CUSUM range exceeds the 1.36 threshold (~95% significance), the break date is tested.
+
+The polyline candidate with the highest `|w|` wins. This hypothesis is never disabled — it is always active.
+
+- **Physical motivation:** A change in subsidence rate due to new pumping regulations, an earthquake-induced poroelastic response, or a construction load onset.
+
+**4. Hypothesis group 4: Exponential trend**
+
+The AIC-based `auto_detect_exp_trend` function tests 20 candidate `b` values (decay rates) against the current residuals. A candidate is accepted when two guards pass: delta-AIC > 10 (strong evidence) and the exponential component explains at least 10% of the series variance. The winning `b` value is tested with the formal w-test.
+
+- **Controlled by:** `--no-exp-trend` (disables this group entirely). Also affected by `--exp-trend`: if a pre-specified `b` value or auto-detected `b` is already in the model (set before the DIA runs), this group is not evaluated because `exp_trend` is not `None`.
+- **Physical motivation:** A compaction well layer showing monotonic consolidation — rapid initial deformation that tapers over years toward a final settlement level. The exponential shape `a.(exp(-b.t)-1)` describes this: zero at the first observation, asymptotic toward amplitude `a` at infinite time.
+
+**Selection rule (Teunissen):** Among all candidates from all four groups, the one with the highest `|w|` is adapted, provided `|w_winner| > z_{alpha/2}` (the two-tailed normal critical value). If no candidate passes this gate, the DIA stops.
+
+**Adaptation** incorporates the winning component into the model, then the next iteration begins with re-estimation.
+
+**Convergence guard:** The DIA stops when the unit variance factor stops improving between iterations (i.e., is no longer decreasing). This prevents the loop from adding components that provide negligible improvement, even before `--max-iter` is reached.
 
 ### Exponential Decay Trend — "What is it?"
 
@@ -433,14 +475,27 @@ Some signals do not increase or decrease at a steady rate — they start fast an
 The model used is:
 
 ```
-displacement(t) = a · (exp(-b · t) − 1)
+displacement(t) = a . (exp(-b . t) - 1)
 ```
 
 - `a` — the amplitude (total displacement at infinite time, in metres)
-- `b` — the decay rate in 1/days. Larger `b` means faster convergence. The time constant τ = 1/b.
+- `b` — the decay rate in 1/days. Larger `b` means faster convergence. The time constant tau = 1/b.
 - At `t = 0`: displacement = 0 (anchored to the first observation)
 
-Because `b` is fixed before OLS fitting (amplitude `a` is solved linearly), this component integrates cleanly with the OMT statistical framework. When using `--exp-trend auto`, the tool scans 20 candidate `b` values and selects the one with the lowest AIC over a plain linear model. The threshold is **ΔAIC > 10** (strong evidence criterion) to avoid adding an exponential trend for weak signals.
+Because `b` is fixed before OLS fitting (amplitude `a` is solved linearly), this component integrates cleanly with the OMT statistical framework. When using `--exp-trend auto`, the tool scans 20 candidate `b` values and selects the one with the lowest AIC over a plain linear model. The threshold is **delta-AIC > 10** (strong evidence criterion) to avoid adding an exponential trend for weak signals.
+
+**Three ways to use exponential trend:**
+
+1. **Omit `--exp-trend` entirely** — the DIA loop may detect an exponential trend as hypothesis group 4 during the identification phase. This is data-driven detection.
+2. **`--exp-trend auto`** — scans for the best `b` value *before* the DIA loop starts, and the detected `b` is baked into the initial model. The DIA group 4 is then skipped because `exp_trend` is already non-None.
+3. **`--exp-trend 0.001`** (numeric) — you specify the decay rate directly. The DIA group 4 is skipped.
+4. **`--no-exp-trend`** — explicitly prevents any exponential trend from being added, by either pre-scan or DIA detection.
+
+**When to use each mode:**
+
+- For MLCW compaction-well layers: start with `--exp-trend auto` to see if the signal has a clear exponential decay shape. If the auto-detection finds no significant trend (skip report or no `_exp_trend` column in the CSV), fall back to the default linear model.
+- For GPS with post-seismic deformation: omit `--exp-trend` and let the DIA detect it as part of the identification phase, since exponential transients here typically follow a known jump.
+- For InSAR with steady subsidence: use `--no-exp-trend` unless you have a physical reason to expect exponential decay (e.g., a site transitioning from elastic to inelastic compaction).
 
 ---
 
@@ -466,7 +521,69 @@ python -m appsigsolv decompose station.csv --component 86.159 \
 
 `--force` deletes any existing JSON/CSV/PNG/report for `86.159` and re-processes from scratch.
 
-### Example 3 — Custom Reconstruction for Comparison
+### Example 3 — MLCW Layer with Exponential Decay Trend, No Seasonal, No Jumps
+
+For a compaction-well layer showing monotonic consolidation without seasonal pumping cycles or abrupt steps:
+
+```bash
+python -m appsigsolv decompose XIGANG_ringbyring.csv \
+    --component 102.096 \
+    --date-col datetime \
+    --unit mm \
+    --poly-deg -1 \
+    --no-seasonal \
+    --no-jump \
+    --no-relax \
+    --exp-trend auto \
+    --periods "" \
+    --auto-periods 0 \
+    --irregular \
+    --output-dir ./MLCW_decomposition
+```
+
+`--no-seasonal` suppresses all seasonal detection (no annual or semi-annual pumping cycles). `--no-jump` prevents step detection (useful when instrument resets are already corrected). `--exp-trend auto` lets the tool find the best consolidation decay rate. The exponential trend component (`<comp>_exp_trend`) appears in the decomposed CSV and as a dashed purple line in the trend panel of the diagnostic plot.
+
+If the auto-detected b value is worth keeping, reconstruct at specific dates:
+
+```bash
+python -m appsigsolv reconstruct XIGANG_ringbyring.csv \
+    --json MLCW_decomposition/XIGANG_ringbyring/XIGANG_ringbyring_model_102.096.json \
+    --target-col 102.096 \
+    --sampling-rate custom \
+    --custom-dates 1,15
+```
+
+### Example 4 — Restrict Date Range to a Subset of the Record
+
+For a GPS station where only the post-2015 period is relevant (e.g., after a known equipment upgrade):
+
+```bash
+python -m appsigsolv decompose gps_timeseries/CHIN_neu.csv \
+    --component dU \
+    --start-date 2015-01-01 \
+    --force --no-relax
+```
+
+The timeseries is truncated before jump detection and DIA processing. Use `--end-date` together with `--start-date` to isolate a specific window of interest.
+
+### Example 5 — Pure Piecewise-Linear Fit with Auto-Sigma
+
+For a signal where you expect multiple velocity changes (e.g., a slow-slip sequence) and want the finest segmentation:
+
+```bash
+python -m appsigsolv decompose gps_timeseries/CHIN_neu.csv \
+    --component dU \
+    --poly-deg 1 \
+    --no-seasonal \
+    --no-jump \
+    --auto-sigma \
+    --sigma-min 1.0 --sigma-max 20.0 --sigma-step 0.5 \
+    --force
+```
+
+`--poly-deg 1` restricts the trend to a linear trend per segment. `--auto-sigma` selects the sigma that produces the most polyline breakpoints rather than the fewest parameters.
+
+### Example 6 — Custom Reconstruction for Comparison
 
 After `decompose` produces a model, reconstruct it on exactly the 1st and 15th of every month:
 
@@ -479,41 +596,6 @@ python -m appsigsolv reconstruct gps_timeseries/TKJS_neu.csv \
     -o results/TKJS_semi_monthly.csv
 ```
 
-### Example 4 — MLCW Column with Exponential Decay Trend
-
-For compaction-well data where a layer shows a monotonic exponential-decay shape (e.g., rapid early compaction tapering off over years), use `--exp-trend auto` to let the tool find the best decay rate:
-
-```bash
-python -m appsigsolv decompose XIGANG_ringbyring.csv \
-    --component 102.096 \
-    --date-col datetime \
-    --unit mm \
-    --poly-deg -1 \
-    --periods 0.5,1 \
-    --auto-periods 5 \
-    --sigma-min 1.0 \
-    --sigma-max 30.0 \
-    --sigma-step 0.5 \
-    --irregular \
-    --no-relax \
-    --exp-trend auto \
-    --output-dir ./MLCW_decomposition
-```
-
-The exponential trend component (`<comp>_exp_trend`) will appear in the decomposed CSV and as a dashed purple line in the trend panel of the diagnostic plot. The fitted `b` value is recorded in the JSON and the report.
-
-To then reconstruct at specific dates using the accepted model:
-
-```bash
-python -m appsigsolv reconstruct XIGANG_ringbyring.csv \
-    --json MLCW_decomposition/XIGANG_ringbyring/XIGANG_ringbyring_model_102.096.json \
-    --target-col 102.096 \
-    --sampling-rate custom \
-    --custom-dates 1,15
-```
-
-The `exp_trend` key in the JSON is picked up automatically — no extra flags needed.
-
 ---
 
 ## 10. Tips, Gotchas & FAQ
@@ -521,6 +603,22 @@ The `exp_trend` key in the JSON is picked up automatically — no extra flags ne
 ### When should I use `--irregular`?
 
 Use `--irregular` whenever your observations are **not daily** (e.g., MLCW or monthly InSAR). It prevents the tool from creating excessive synthetic points via resampling.
+
+### When should I use `--no-seasonal`?
+
+Use `--no-seasonal` when you know the signal has no periodic component — for example, a deep aquitard layer where seasonal pumping does not reach, or a compaction well in a purely inelastic deformation regime. Without this flag, the DIA may waste iterations trying to fit harmonics to noise. It also speeds up processing because Lomb-Scargle period detection is skipped.
+
+### When should I use `--no-jump`?
+
+Use `--no-jump` when the timeseries has already been corrected for steps (instrument resets, co-seismic offsets) in preprocessing, or when the signal genuinely has no abrupt changes (e.g., a compaction layer measured by a well-calibrated MLCW). Without this flag, the DIA may identify outlier epochs as step functions, adding unnecessary parameters.
+
+### When should I use `--no-exp-trend`?
+
+Use `--no-exp-trend` when the signal is well described by a linear or polynomial trend and you want to prevent the algorithm from chasing an exponential shape in the residuals. This is especially useful for InSAR timeseries where steady, linear subsidence is expected and any curvature comes from atmospheric noise rather than physical decay.
+
+### When is `--auto-sigma` useful?
+
+Use `--auto-sigma` when the physical process you are studying produces velocity changes rather than steps or seasonal cycles. Typical targets: slow-slip events in GPS, stick-slip motion in creepmeters, staged construction settlement. The selection criterion flips from "fewest parameters" to "most polyline breakpoints."
 
 ### How does automatic polynomial selection work?
 
@@ -562,14 +660,45 @@ On Windows, running many stations in a single Python process can exhaust GDI han
 
 Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact. `appsigsolv` automatically normalises all numeric column names to 3 decimal places (`86.159`) during loading, so all output filenames, JSON keys, and CSV headers use the clean form.
 
+### What happens with `--start-date` / `--end-date`?
+
+Date filtering is applied **after** preprocessing (gap-filling, outlier removal) and **before** jump detection. This means:
+- Outliers near the date boundaries are still removed based on the full-series MAD.
+- Jump detection sees only the filtered window, so jumps outside the window do not affect the model.
+- The reference epoch (t=0) for the polynomial and exponential trend is the first date in the filtered window.
+
 ---
 
 ## 11. Changelog
 
+### v0.5.0 (2026-06)
+
+**New flags for controlling DIA hypothesis groups:**
+
+- **`--no-jump`:** Disables automatic jump detection (hypothesis group 1 — datasnooping/outlier). Manually specified `--jumps` dates are still applied. Essential for MLCW data where instrument resets have already been corrected in preprocessing.
+- **`--no-seasonal`:** Disables all periodic/seasonal detection (hypothesis group 2 — Lomb-Scargle period search). Overrides `--periods` and `--auto-periods`. Speeds up processing for non-seasonal signals like deep aquitard compaction.
+- **`--no-exp-trend`:** Disables exponential trend auto-detection (hypothesis group 4). Sets a sentinel value that prevents the DIA from identifying an exponential decay trend, even if the residuals show one. Use this for InSAR or GPS signals where linear subsidence is expected and curvature is noise.
+- **`--auto-sigma`:** Selects the sigma value that maximises polyline breakpoints rather than minimising parameter count. Designed for pure piecewise-linear fitting where the goal is the finest velocity segmentation that still honours the OMT.
+
+**Date range filtering:**
+
+- **`--start-date` / `--end-date`:** Filter the timeseries to a specific date window before jump detection and DIA processing. Input format: `YYYY-MM-DD` (inclusive). Applied after gap-filling and outlier removal.
+
+**Documentation improvements:**
+
+- DIA hypothesis groups now documented individually with their controlling flags and physical motivation.
+- `allowed_periods` mechanism explained: the DIA can only add periods within 0.05 years of the candidate set (merged from `--periods` and `--auto-periods`).
+- Saved JSON filtering documented: `no_seasonal`, `no_jump`, and `allowed_periods` are runtime-only and stripped from persisted JSON files.
+- New worked examples for date-range filtering, auto-sigma piecewise-linear fitting, and combined suppression flags for MLCW processing.
+
+**`--exp-trend` interaction clarified:**
+
+Three modes now documented: (1) omit `--exp-trend` to let DIA detect it, (2) `--exp-trend auto` for pre-scan, (3) numeric value for user-specified decay rate, plus (4) `--no-exp-trend` to disable entirely.
+
 ### v0.4.1 (2026-05)
 
 **Bug fixes:**
-- **Timing regression fix:** A step-function hypothesis (Heaviside H(t−t₀)) introduced in a prior commit caused an 8× slowdown and widespread timeout failures (e.g., GFES, KTES). Root cause: the iterative DIA loop found CUSUM structural breaks on every iteration for under-assumed sigma values, accumulating up to 30 spurious step dates and bloating the design matrix. The in-loop step hypothesis has been removed entirely.
+- **Timing regression fix:** A step-function hypothesis (Heaviside H(t-t0)) introduced in a prior commit caused an 8x slowdown and widespread timeout failures (e.g., GFES, KTES). Root cause: the iterative DIA loop found CUSUM structural breaks on every iteration for under-assumed sigma values, accumulating up to 30 spurious step dates and bloating the design matrix. The in-loop step hypothesis has been removed entirely.
 - **GFES/KTES restored:** Both stations that were incorrectly producing `_skipped_dU.txt` (timeout) now complete and produce accepted models as before.
 
 **Improvements:**
@@ -582,7 +711,7 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 - **3-minute per-component timeout:** Fitting runs in a daemon thread; the main thread waits up to 180 s. If it exceeds this, the thread is abandoned, a skip report is written, and the batch continues. This prevents malfunctioned or highly irregular timeseries from blocking an entire batch on Windows (where `signal.SIGALRM` is unavailable).
 
 **Performance:**
-- **18× Lomb-Scargle speedup in DIA loop:** The `days[]` and `freqs[]` arrays in `_identify_best_alternative` are now pre-computed once before the DIA iteration loop (they are loop-invariant) and passed in, instead of being recomputed every iteration. The frequency grid was also reduced from 5 000 to 500 points — sufficient to resolve all peaks between 0.2–20 yr, cutting per-call time ~10×. Combined effect: a 15-year GPS series (5 476 pts, CHIN station) drops from ~18 minutes to ~60 seconds.
+- **18x Lomb-Scargle speedup in DIA loop:** The `days[]` and `freqs[]` arrays in `_identify_best_alternative` are now pre-computed once before the DIA iteration loop (they are loop-invariant) and passed in, instead of being recomputed every iteration. The frequency grid was also reduced from 5 000 to 500 points — sufficient to resolve all peaks between 0.2–20 yr, cutting per-call time ~10x. Combined effect: a 15-year GPS series (5 476 pts, CHIN station) drops from ~18 minutes to ~60 seconds.
 
 **Output / UX:**
 - **Reduced verbose output:** Removed per-component log lines that cluttered batch output: `[periods] Forcing...`, `Series loaded: N points`, `[extract] Components: [...]`, and all four `[output] ... saved` lines. What remains: preprocessing stats, sigma-scan result, auto-deg selection, skip/timeout notices, and errors.
@@ -613,4 +742,4 @@ Float column names in CSVs (e.g. `86.15899999999999`) are a pandas read artefact
 
 ---
 
-*Package version: 0.4.1 | appsigsolv — Applied Signal Solver*
+*Package version: 0.5.0 | appsigsolv — Applied Signal Solver*
