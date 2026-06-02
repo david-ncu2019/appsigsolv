@@ -36,8 +36,9 @@ def save_plot(series: pd.Series, components: dict, best_model: dict, comp: str, 
     ax_main = fig.add_subplot(gs_left[0:2, 0])
     ax_trend = fig.add_subplot(gs_left[2, 0], sharex=ax_main)
 
-    ax_main.plot(idx, series.values * scale, "o", linestyle=":", ms=5, lw=1.5, alpha=0.75, color="#95a5a6", label="Observed")
-    ax_main.plot(idx, components[f"{comp}_model"].values * scale, "-", lw=2, color="#e74c3c", label="Model")
+    ax_main.plot(idx, series.values * scale, "o", linestyle=":", ms=10, lw=1.5, alpha=0.75,
+                 markeredgecolor="red", markeredgewidth=1.5, markerfacecolor="none", color="#95a5a6", label="Observed")
+    ax_main.plot(idx, components[f"{comp}_model"].values * scale, "-", lw=3, color="blue", label="Model")
     stats = best_model.get("_omt_stats", {"sigma_mm": 1.0, "p_value": 1.0, "n_param": 1})
     ax_main.set_title(f"{stem}  —  {comp}", fontweight='bold')
     ax_main.set_ylabel(f"Displacement ({unit})")

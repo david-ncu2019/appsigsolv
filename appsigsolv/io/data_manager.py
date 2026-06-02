@@ -114,7 +114,8 @@ def load_json_config(json_path):
     return config
 
 def save_json_config(best_model: dict, comp: str, out_root: Path, stem: str) -> Path:
-    model_config = {k: v for k, v in best_model.items() if not k.startswith("_")}
+    model_config = {k: v for k, v in best_model.items()
+                    if not k.startswith("_") and k not in ("no_seasonal", "no_jump", "allowed_periods")}
     json_path = out_root / f"{stem}_model_{comp}.json"
     with open(json_path, "w") as f:
         json.dump(model_config, f, indent=4)
