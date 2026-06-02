@@ -387,16 +387,17 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
     best_val = None
 
     # --- Hypothesis group 1: datasnooping (single-epoch outlier) ------------
-    w_epoch = _compute_w_stats(residuals, G, sigma_m)
-    max_epoch_idx = int(np.argmax(np.abs(w_epoch)))
-    max_epoch_w = float(np.abs(w_epoch[max_epoch_idx]))
-    if max_epoch_w > best_w:
-        best_w = max_epoch_w
-        best_type = "outlier"
-        best_val = max_epoch_idx
+    if not model.get("no_jump", False):
+        w_epoch = _compute_w_stats(residuals, G, sigma_m)
+        max_epoch_idx = int(np.argmax(np.abs(w_epoch)))
+        max_epoch_w = float(np.abs(w_epoch[max_epoch_idx]))
+        if max_epoch_w > best_w:
+            best_w = max_epoch_w
+            best_type = "outlier"
+            best_val = max_epoch_idx
 
     # --- Hypothesis group 2: missing periodic signal ------------------------
-    if n >= 20:
+    if n >= 20 and not model.get("no_seasonal", False):
         if freqs is None:
             freqs = np.linspace(2*np.pi/(20*365.25), 2*np.pi/(0.2*365.25), 500)
         pgram = lombscargle(days, residuals, freqs, normalize=True)
@@ -409,6 +410,10 @@ def _identify_best_alternative(residuals: np.ndarray, dates: list, model: dict,
             for p_idx in sorted_peaks[:5]:   # check top-5 spectral peaks
                 f_rad = freqs[p_idx]
                 period_yr = round((2*np.pi / f_rad) / 365.25, 2)
+                # Only accept periods in the allowed set (if restricted)
+                allowed_vals = model.get("allowed_periods")
+                if allowed_vals is not None and not any(abs(period_yr - a) < 0.05 for a in allowed_vals):
+                    continue
                 if any(abs(period_yr - existing) < 0.05 for existing in model.get("periodic", [])):
                     continue
                 period_days = period_yr * 365.25
@@ -549,7 +554,8 @@ def robust_analyze_residuals(residuals: np.ndarray, dates: list, model: dict):
 
 def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines,
                      initial_logs, poly_deg, sigma_mm, alpha, max_iter,
-                     exp_trend_b=None):
+                     exp_trend_b=None, no_seasonal=False, no_jump=False,
+                     allowed_periods=None):
     """
     Run the Teunissen DIA loop for a single assumed a-priori sigma.
 
@@ -598,6 +604,9 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines,
         "exp": {},
         "log": initial_logs,
         "exp_trend": exp_trend_b,
+        "no_seasonal": no_seasonal,
+        "no_jump": no_jump,
+        "allowed_periods": allowed_periods,
     }
 
     # Pre-compute loop-invariant arrays for _identify_best_alternative
@@ -661,6 +670,9 @@ def run_omt_dia_loop(series, jump_dates, initial_periods, initial_polylines,
                 adapt_val = None
 
         if adapt_type == "outlier":
+            if model.get("no_jump", False):
+                # Outlier detected but jumps suppressed — skip this adaptation
+                break
             # Outlier identified: flag by inserting a unit-step at that epoch
             # (equivalent to removing the epoch from estimation)
             outlier_date = date_list[adapt_val].strftime("%Y%m%d")
@@ -763,10 +775,13 @@ def test_relaxation(series, jump_dates, accepted_model, alpha):
 
 def _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods,
                       initial_polylines, initial_logs, poly_deg, alpha, max_iter,
-                      exp_trend_b=None):
+                      exp_trend_b=None, no_seasonal=False, no_jump=False,
+                      allowed_periods=None):
     result = run_omt_dia_loop(
         series, jump_dates, candidate_periods, initial_polylines, initial_logs,
-        poly_deg, sigma_mm, alpha, max_iter, exp_trend_b=exp_trend_b
+        poly_deg, sigma_mm, alpha, max_iter, exp_trend_b=exp_trend_b,
+        no_seasonal=no_seasonal, no_jump=no_jump,
+        allowed_periods=allowed_periods,
     )
     if result is not None:
         s = result["_omt_stats"]
@@ -792,12 +807,20 @@ def _run_single_sigma(sigma_mm, series, jump_dates, candidate_periods,
 
 def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
                        initial_logs, poly_deg, sigma_min, sigma_max, sigma_step,
-                       alpha, max_iter, no_relax=False, cores=1, exp_trend_b=None):
+                       alpha, max_iter, no_relax=False, cores=1, exp_trend_b=None,
+                       no_seasonal=False, auto_sigma=False, no_jump=False,
+                       allowed_periods=None):
     """
     Scan a range of assumed a-priori sigma values and run the full DIA loop
-    for each.  The selected sigma is the one that satisfies the OMT with the
-    most parsimonious model — it is therefore an a-posteriori estimate chosen
-    to honour the test, not a pre-set instrument specification.
+    for each.
+
+    Selection rules (applied after all sigmas are scanned):
+        auto_sigma=False (default): most parsimonious model (min n_param).
+            Designed for general-purpose use.
+        auto_sigma=True : model with most polyline breakpoints.
+            Designed for pure piecewise-linear fitting where the goal is
+            to resolve the finest velocity segmentation that still honours
+            the OMT.
     """
     sigmas = np.arange(sigma_min, sigma_max + sigma_step * 0.5, sigma_step)
     scan_results = []
@@ -811,7 +834,8 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
             series=series, jump_dates=jump_dates,
             candidate_periods=candidate_periods, initial_polylines=initial_polylines,
             initial_logs=initial_logs, poly_deg=poly_deg, alpha=alpha,
-            max_iter=max_iter, exp_trend_b=exp_trend_b
+            max_iter=max_iter, exp_trend_b=exp_trend_b, no_seasonal=no_seasonal,
+            no_jump=no_jump, allowed_periods=allowed_periods,
         )
         with concurrent.futures.ProcessPoolExecutor(max_workers=cores) as executor:
             for result, table_row in executor.map(worker, sigmas):
@@ -822,7 +846,9 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
         for sigma_mm in sigmas:
             result, table_row = _run_single_sigma(
                 sigma_mm, series, jump_dates, candidate_periods, initial_polylines,
-                initial_logs, poly_deg, alpha, max_iter, exp_trend_b=exp_trend_b
+                initial_logs, poly_deg, alpha, max_iter, exp_trend_b=exp_trend_b,
+                no_seasonal=no_seasonal, no_jump=no_jump,
+                allowed_periods=allowed_periods,
             )
             scan_table.append(table_row)
             if result is not None:
@@ -831,12 +857,19 @@ def run_omt_sigma_scan(series, jump_dates, candidate_periods, initial_polylines,
     if not scan_results:
         return None, scan_table
 
-    # Select most parsimonious model that passed OMT
-    best = min(scan_results, key=lambda m: (
-        m["_omt_stats"]["n_param"],
-        m["_omt_stats"]["sigma_mm"],
-        -m["_omt_stats"]["p_value"],
-    ))
+    if auto_sigma:
+        # Pure polyline: maximize velocity breakpoints → finest segmentation
+        best = max(scan_results, key=lambda m: (
+            len(m.get("polyline", [])),
+            m["_omt_stats"]["p_value"],
+        ))
+    else:
+        # Default: most parsimonious model that passed OMT
+        best = min(scan_results, key=lambda m: (
+            m["_omt_stats"]["n_param"],
+            m["_omt_stats"]["sigma_mm"],
+            -m["_omt_stats"]["p_value"],
+        ))
     print(f"  [sigma-scan] Selected sigma={best['_omt_stats']['sigma_mm']:.1f} mm "
           f"(a-posteriori; sigma_hat={best['_omt_stats']['sigma_hat_mm']:.2f} mm, "
           f"p={best['_omt_stats']['p_value']:.4f})")

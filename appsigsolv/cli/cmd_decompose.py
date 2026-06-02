@@ -52,7 +52,10 @@ def run_decompose(args):
     else:
         components_to_process = [c.strip() for c in args.component.split(",")]
 
-    candidate_periods = [float(p) for p in args.periods.split(",")] if args.periods else []
+    if getattr(args, "no_seasonal", False):
+        candidate_periods = []
+    else:
+        candidate_periods = [float(p) for p in args.periods.split(",")] if args.periods else []
     extra_jumps = [d.strip() for d in args.jumps.split(",") if d.strip()]
     extra_polylines = [d.strip().replace("-", "") for d in args.polylines.split(",") if d.strip()]
 
@@ -88,12 +91,25 @@ def run_decompose(args):
             print(f"  [error] Component '{comp}' has no valid data after preprocessing. Skipping.")
             continue
 
+        # Date range filtering (applied after preprocessing, before jump detection)
+        if getattr(args, "start_date", None) or getattr(args, "end_date", None):
+            start = pd.Timestamp(args.start_date) if args.start_date else series.index.min()
+            end = pd.Timestamp(args.end_date) if args.end_date else series.index.max()
+            series = series[(series.index >= start) & (series.index <= end)]
+            print(f"  [filter] Date range: {start.date()} to {end.date()} — {len(series)} points retained")
+            if len(series) == 0:
+                print(f"  [error] Component '{comp}' has no data within the specified date range. Skipping.")
+                continue
+
         try:
-            jump_dates = detect_jumps(series, extra_jumps)
+            if getattr(args, "no_jump", False):
+                jump_dates = [pd.Timestamp(d) for d in extra_jumps if d]
+            else:
+                jump_dates = detect_jumps(series, extra_jumps)
 
             final_periods = list(candidate_periods)
 
-            if args.auto_periods > 0:
+            if not getattr(args, "no_seasonal", False) and args.auto_periods > 0:
                 auto_p = auto_detect_periods(series, max_periods=args.auto_periods)
                 screened_auto = prescreen_periods(series, auto_p)
                 for p in screened_auto:
@@ -105,7 +121,9 @@ def run_decompose(args):
 
             # Resolve --exp-trend argument
             exp_trend_arg = getattr(args, "exp_trend", None)
-            if exp_trend_arg is None:
+            if getattr(args, "no_exp_trend", False):
+                exp_trend_b = False   # sentinel: prevents hypothesis group 4 in DIA
+            elif exp_trend_arg is None:
                 exp_trend_b = None
             elif str(exp_trend_arg).lower() == "auto":
                 exp_trend_b = auto_detect_exp_trend(series)
@@ -139,7 +157,11 @@ def run_decompose(args):
                             args.sigma_min, args.sigma_max, args.sigma_step,
                             args.alpha, args.max_iter,
                             no_relax=args.no_relax, cores=args.cores,
-                            exp_trend_b=exp_trend_b
+                            exp_trend_b=exp_trend_b,
+                            no_seasonal=getattr(args, "no_seasonal", False),
+                            auto_sigma=getattr(args, "auto_sigma", False),
+                            no_jump=getattr(args, "no_jump", False),
+                            allowed_periods=final_periods,
                         )
                         if best_model_deg is not None:
                             if best_overall_model is None:

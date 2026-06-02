@@ -37,9 +37,33 @@ def create_parser():
     p_dec.add_argument("--irregular", action="store_true", help="Do NOT resample to a daily grid")
     p_dec.add_argument("--no-plot", action="store_true", help="Skip PNG generation")
     p_dec.add_argument("--no-relax", action="store_true", help="Skip exponential/logarithmic relaxation testing")
+    p_dec.add_argument(
+        "--no-jump", dest="no_jump", action="store_true",
+        help="Disable automatic jump (step offset) detection. "
+             "Manually specified --jumps dates are still used."
+    )
+    p_dec.add_argument(
+        "--no-seasonal", dest="no_seasonal", action="store_true",
+        help="Disable all periodic/seasonal component detection "
+             "(overrides --periods and --auto-periods)."
+    )
+    p_dec.add_argument(
+        "--no-exp-trend", dest="no_exp_trend", action="store_true",
+        help="Disable exponential trend auto-detection "
+             "(hypothesis group 4 in DIA identification)."
+    )
+    p_dec.add_argument(
+        "--auto-sigma", dest="auto_sigma", action="store_true",
+        help="Select sigma that maximizes polyline breakpoints "
+             "(pure piecewise-linear: overrides parsimony preference)."
+    )
     p_dec.add_argument("--output-dir", default="", help="Parent dir for output folder")
     p_dec.add_argument("--cores", type=int, default=1, help="Number of CPU cores for parallel processing (default: 1)")
     p_dec.add_argument("--force", action="store_true", help="Overwrite existing results (default: skip already-processed components)")
+    p_dec.add_argument("--start-date", default=None,
+                       help="Filter data to this start date (YYYY-MM-DD, inclusive)")
+    p_dec.add_argument("--end-date", default=None,
+                       help="Filter data to this end date (YYYY-MM-DD, inclusive)")
     p_dec.add_argument(
         "--exp-trend", dest="exp_trend", default=None, metavar="B_OR_AUTO",
         help="Exponential trend component exp(-b*t)-1. Pass 'auto' to auto-detect the best decay rate, "
